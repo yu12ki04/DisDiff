@@ -493,7 +493,7 @@ class Cars3DTrain(Cars3D):
 
 class Celebarain(CelebAlmdb):
     def __init__(self, **kwargs):
-        super().__init__(path= './data/celeba/'# change '/path/to/your/datasets/',
+        super().__init__(path= './data/celeba/',# change '/path/to/your/datasets/',
                 image_size=64,
                 original_resolution=None,
                 crop_d2c=True,
