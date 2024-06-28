@@ -293,7 +293,15 @@ class BaseLMDB(Dataset):
             img_bytes = txn.get(key)
 
         buffer = BytesIO(img_bytes)
-        img = Image.open(buffer)
+        try:
+            buffer.seek(0)
+            img = Image.open(buffer)
+            img.verify()  # Verify that it is, in fact, an image
+            buffer.seek(0)
+            img = Image.open(buffer)  # Reload image for actual use
+        except (IOError, SyntaxError) as e:
+            raise ValueError(f"Failed to load image from buffer for key: {key}, error: {e}")
+
         return img
 class CelebAlmdb(Dataset):
     """
@@ -495,7 +503,7 @@ class Celebarain(CelebAlmdb):
     def __init__(self, **kwargs):
         super().__init__(path= './data/celeba/train-images.lmdb',# change '/path/to/your/datasets/',
                 image_size=64,
-                original_resolution=None,
+                original_resolution=128,
                 crop_d2c=True,
                 **kwargs)
 
