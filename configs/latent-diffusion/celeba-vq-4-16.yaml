@@ -74,7 +74,7 @@ data:
     train:
       target: ldm.data.dis.Celebarain
     test:
-      target: ldm.data.dis.Cars3DTrain
+      target: ldm.data.dis.Celebarain #change ldm.data.dis.Cars3DTrain
 
 lightning:
   callbacks:
