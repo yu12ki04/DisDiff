@@ -86,7 +86,7 @@ lightning:
         increase_log_steps: false
         log_images_kwargs:
           inpaint: false
-
+          plot_swapped_concepts_partial: false
 
   trainer:
     benchmark: True
