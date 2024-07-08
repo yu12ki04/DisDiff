@@ -357,6 +357,61 @@ class CelebAlmdb(Dataset):
         if self.transform is not None:
             img = self.transform(img).permute(1, 2, 0)
         return {'image': img}
+    
+class Mercarilmdb(Dataset):
+    """
+    also supports for d2c crop.
+    """
+    def __init__(self,
+                 path,
+                 image_size,
+                 original_resolution=128,
+                 split=None,
+                 as_tensor: bool = True,
+                 do_augment: bool = False,
+                 do_normalize: bool = True,
+                 crop_d2c: bool = False,
+                 **kwargs):
+        self.original_resolution = original_resolution
+        self.data = BaseLMDB(path, original_resolution, zfill=7)
+        self.length = len(self.data)
+        self.crop_d2c = crop_d2c
+
+        if split is None:
+            self.offset = 0
+        else:
+            raise NotImplementedError()
+
+        if crop_d2c:
+            transform = [
+                d2c_crop(),
+                transforms.Resize(image_size),
+            ]
+        else:
+            transform = [
+                transforms.Resize(image_size),
+                transforms.CenterCrop(image_size),
+            ]
+
+        if do_augment:
+            transform.append(transforms.RandomHorizontalFlip())
+        if as_tensor:
+            transform.append(transforms.ToTensor())
+        if do_normalize:
+            transform.append(
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
+        self.transform = transforms.Compose(transform)
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        assert index < self.length
+        index = index + self.offset
+        img = self.data[index]
+        if self.transform is not None:
+            img = self.transform(img).permute(1, 2, 0)
+        return {'image': img}
 
 class Bedroom_lmdb(Dataset):
     def __init__(self,
@@ -507,3 +562,10 @@ class Celebarain(CelebAlmdb):
                 crop_d2c=True,
                 **kwargs)
 
+class Mercaritrain(Mercarilmdb):
+    def __init__(self, **kwargs):
+        super().__init__(path= './data/mercari/0702.lmdb',# change '/path/to/your/datasets/',
+                image_size=64,
+                original_resolution=128,
+                crop_d2c=True,
+                **kwargs)
