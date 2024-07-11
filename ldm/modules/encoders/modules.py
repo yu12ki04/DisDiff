@@ -200,6 +200,83 @@ class FrozenClipImageEmbedder(nn.Module):
         # x is assumed to be in range [-1,1]
         return self.model.encode_image(self.preprocess(x))
 
+
+# ------------------------------------------
+import torch
+import torch.nn as nn
+from functools import partial
+import clip
+from einops import rearrange, repeat
+import kornia
+from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
+
+class LoRALinear(nn.Module):
+    def __init__(self, in_features, out_features, rank=4):
+        super().__init__()
+        self.rank = rank
+        self.linear = nn.Linear(in_features, out_features, bias=False)
+        self.lora_A = nn.Parameter(torch.randn(in_features, rank))
+        self.lora_B = nn.Parameter(torch.randn(rank, out_features))
+        self.scaling = 1 / (rank ** 0.5)
+
+    def forward(self, x):
+        return self.linear(x) + (x @ self.lora_A @ self.lora_B) * self.scaling
+
+class LoRA_CLIPTextImageEmbedder(nn.Module):
+    """
+    Uses the CLIP transformer encoder for both text and images with LoRA.
+    """
+    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, normalize=True, rank=4):
+        super().__init__()
+        self.model, _ = clip.load(version, jit=False, device=device)
+        self.device = device
+        self.max_length = max_length
+        self.normalize = normalize
+        self.rank = rank
+
+        # Replace linear layers with LoRA layers
+        self.replace_with_lora(self.model)
+
+    def replace_with_lora(self, model):
+        for name, module in model.named_children():
+            if isinstance(module, nn.Linear):
+                setattr(model, name, LoRALinear(module.in_features, module.out_features, self.rank))
+            else:
+                self.replace_with_lora(module)
+
+    def forward(self, text, image):
+        # Tokenize and encode text
+        text_tokens = clip.tokenize(text).to(self.device)
+        text_features = self.model.encode_text(text_tokens)
+
+        # Preprocess and encode image
+        image = self.preprocess(image).to(self.device)
+        image_features = self.model.encode_image(image)
+
+        if self.normalize:
+            text_features = text_features / torch.linalg.norm(text_features, dim=1, keepdim=True)
+            image_features = image_features / torch.linalg.norm(image_features, dim=1, keepdim=True)
+
+        return text_features, image_features
+
+    def preprocess(self, x):
+        # Normalize to [0,1]
+        x = kornia.geometry.resize(x, (224, 224),
+                                   interpolation='bicubic', align_corners=True,
+                                   antialias=True)
+        x = (x + 1.) / 2.
+        # Renormalize according to CLIP
+        x = kornia.enhance.normalize(x, self.mean, self.std)
+        return x
+
+    def encode(self, text, image):
+        return self(text, image)
+
+# ------------------------------------------
+
+
+
+
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, mid_channels=None, bn=False):
         super(ResBlock, self).__init__()
