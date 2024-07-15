@@ -44,7 +44,7 @@ model:
         resblock_updown: true
         seprate_decoder: true
         orth_emb: true
-        ckpt_path: "./logs/2024-07-08T03-36-57_celeba-vq-4-16/checkpoints/last.ckpt"
+        ckpt_path: "/content/drive/Shareddrives/mercari/resulsts/logs/mercari/0711/2024-07-11T04-30-14_mercari_vq_4_16/checkpoints/last.ckpt"
         load_ema_ckpt: true
         latent_unit: 6
 
@@ -55,7 +55,7 @@ model:
         embed_dim: 3
         n_embed: 2048
         monitor: "val/rec_loss"
-        ckpt_path: "./logs/2024-06-30T23-27-32_celeba_vq_4_16/checkpoints/last.ckpt"
+        ckpt_path: "/content/drive/Shareddrives/mercari/resulsts/logs/mercari/0711/2024-07-11T10-23-29_mercari-vq-4-16/checkpoints/last.ckpt"
         ddconfig:
           double_z: false
           z_channels: 3
