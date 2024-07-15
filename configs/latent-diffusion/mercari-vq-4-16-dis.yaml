@@ -74,13 +74,12 @@ model:
           target: torch.nn.Identity
 
     cond_stage_config:
-      target: ldm.modules.encoders.modules.FrozenCLIPTextEmbedder
+      target: ldm.modules.encoders.modules.FrozenClipImageEmbedder
       params:
-        version: 'ViT-L/14'
+        model: 'ViT-L/14'
+        jit: false
         device: 'cuda'
-        max_length: 77
-        n_repeat: 1
-        normalize: true
+        antialias: false
     dis_loss_type: Z
     dis_weight: 0.05
 data:
