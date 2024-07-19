@@ -169,8 +169,8 @@ class FrozenCLIPTextEmbedder(nn.Module):
 
 class FrozenClipImageEmbedder(nn.Module):
     """
-        Uses the CLIP image encoder.
-        """
+    Uses the CLIP image encoder.
+    """
     def __init__(
             self,
             model,
@@ -206,7 +206,10 @@ class FrozenClipImageEmbedder(nn.Module):
 
     def forward(self, x):
         # x is assumed to be in range [-1,1]
-        return self.model.encode_image(self.preprocess(x)).float()
+        z = self.model.encode_image(self.preprocess(x)).float()
+        # 形状を調整
+        z = z.view(z.size(0), -1)  # (batch_size, 32)
+        return z
 
 
 # ------------------------------------------
