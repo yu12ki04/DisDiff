@@ -137,7 +137,7 @@ class SpatialRescaler(nn.Module):
 
 class FrozenCLIPTextEmbedder(nn.Module):
     """
-    Uses the CLIP transformer encoder for text.
+    Uses the CLIP text encoder.
     """
     def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
         super().__init__()
@@ -206,7 +206,7 @@ class FrozenClipImageEmbedder(nn.Module):
 
     def forward(self, x):
         # x is assumed to be in range [-1,1]
-        return self.model.encode_image(self.preprocess(x))
+        return self.model.encode_image(self.preprocess(x)).float()
 
 
 # ------------------------------------------
