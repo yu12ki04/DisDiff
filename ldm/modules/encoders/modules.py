@@ -174,6 +174,7 @@ class FrozenClipImageEmbedder(nn.Module):
     def __init__(
             self,
             model,
+            latent_dim=192,  # Encoder4と同じlatent_dimを使用
             jit=False,
             device='cuda' if torch.cuda.is_available() else 'cpu',
             antialias=False,
@@ -182,12 +183,16 @@ class FrozenClipImageEmbedder(nn.Module):
         self.model, _ = clip.load(name=model, device=device, jit=jit)
 
         self.antialias = antialias
+        self.latent_dim = latent_dim
 
         self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
         self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
 
         # パラメータを凍結
         self.freeze()
+
+        # 最終層の線形変換
+        self.linear = nn.Linear(768, self.latent_dim)  # 768はViT-L/14の出力次元
 
     def freeze(self):
         self.model = self.model.eval()
@@ -208,7 +213,9 @@ class FrozenClipImageEmbedder(nn.Module):
         # x is assumed to be in range [-1,1]
         z = self.model.encode_image(self.preprocess(x)).float()
         # 形状を調整
-        z = z.view(z.size(0), -1)  # (batch_size, 32)
+        z = z.view(z.size(0), -1)  # (batch_size, 768)
+        # 最終層の線形変換
+        z = self.linear(z)  # (batch_size, latent_dim)
         return z
 
 
