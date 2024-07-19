@@ -185,14 +185,19 @@ class FrozenClipImageEmbedder(nn.Module):
 
         self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
         self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
+
         # パラメータを凍結
         self.freeze()
 
+    def freeze(self):
+        self.model = self.model.eval()
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def preprocess(self, x):
         # normalize to [0,1]
         x = kornia.geometry.resize(x, (224, 224),
-                                   interpolation='bicubic',align_corners=True,
+                                   interpolation='bicubic', align_corners=True,
                                    antialias=self.antialias)
         x = (x + 1.) / 2.
         # renormalize according to clip
