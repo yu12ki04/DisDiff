@@ -567,5 +567,5 @@ class Mercaritrain(Mercarilmdb):
         super().__init__(path= './data/0711.lmdb',# change '/path/to/your/datasets/',
                 image_size=64,
                 original_resolution=128,
-                crop_d2c=True,
+                crop_d2c=False,
                 **kwargs)
