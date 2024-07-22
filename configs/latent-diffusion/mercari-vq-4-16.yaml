@@ -46,7 +46,7 @@ model:
         embed_dim: 3
         n_embed: 2048
         monitor: "val/rec_loss"
-        ckpt_path: "./logs/2024-06-30T23-27-32_celeba_vq_4_16/checkpoints/last.ckpt"
+        ckpt_path: "/content/drive/Shareddrives/mercari/resulsts/logs/mercari/0722/2024-07-22T03-21-43_mercari_vq_4_16/checkpoints/last.ckpt"
         ddconfig:
           double_z: false
           z_channels: 3
