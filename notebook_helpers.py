@@ -107,16 +107,21 @@ def select_cond_path(mode):
     selected_path = os.path.join(path, selected.value)
     return selected_path
 
-
 def get_cond(mode, selected_path):
     example = dict()
     if mode == "superresolution":
         up_f = 4
         visualize_cond_img(selected_path)
+        target_size=(3, 64, 64)
 
         c = Image.open(selected_path)
         c = torch.unsqueeze(torchvision.transforms.ToTensor()(c), 0)
         c_up = torchvision.transforms.functional.resize(c, size=[up_f * c.shape[2], up_f * c.shape[3]], antialias=True)
+
+        # 画像を指定されたサイズにリシェイプ
+        c_up = torchvision.transforms.functional.resize(c_up, size=target_size[1:3], antialias=True)  # (C, H, W)にリサイズ
+        c = torchvision.transforms.functional.resize(c, size=target_size[1:3], antialias=True)  # (C, H, W)にリサイズ
+
         c_up = rearrange(c_up, '1 c h w -> 1 h w c')
         c = rearrange(c, '1 c h w -> 1 h w c')
         c = 2. * c - 1.
@@ -142,11 +147,11 @@ def run(model, selected_path, task, custom_steps, resize_enabled=False, classifi
     guider = None
     ckwargs = None
     mode = 'ddim'
-    ddim_use_x0_pred = False
+    ddim_use_x0_pred = True
     temperature = 1.
     eta = 1.
     make_progrow = True
-    custom_shape = None
+    custom_shape = (1, 3, 64, 64)
 
     height, width = example["image"].shape[1:3]
     split_input = height >= 128 and width >= 128
@@ -174,10 +179,11 @@ def run(model, selected_path, task, custom_steps, resize_enabled=False, classifi
         if custom_shape is not None:
             x_T = torch.randn(1, custom_shape[1], custom_shape[2], custom_shape[3]).to(model.device)
             x_T = repeat(x_T, '1 c h w -> b c h w', b=custom_shape[0])
+        print(x_T.shape)
 
         logs = make_convolutional_sample(example, model,
                                          mode=mode, custom_steps=custom_steps,
-                                         eta=eta, swap_mode=False , masked=masked,
+                                         eta=eta, swap_mode=True , masked=masked,
                                          invert_mask=invert_mask, quantize_x0=False,
                                          custom_schedule=None, decode_interval=10,
                                          resize_enabled=resize_enabled, custom_shape=custom_shape,
