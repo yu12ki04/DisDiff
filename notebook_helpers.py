@@ -32,7 +32,11 @@ def download_models(mode):
         path_conf = path_conf + '/?dl=1' # fix it
         path_ckpt = path_ckpt + '/?dl=1' # fix it
         return path_conf, path_ckpt
+    elif mode == "mercari":
+        path_conf = '/content/drive/Shareddrives/mercari/resulsts/logs/mercari/0923_simple/exp_vq_mercari/2024-09-24T14-34-31_s0/configs/2024-09-24T14-34-31-project.yaml'
+        path_ckpt = '/content/drive/Shareddrives/mercari/resulsts/logs/mercari/0923_simple/exp_vq_mercari/2024-09-24T14-34-31_s0/checkpoints/last.ckpt'
 
+        return path_conf, path_ckpt
     else:
         raise NotImplementedError
 
