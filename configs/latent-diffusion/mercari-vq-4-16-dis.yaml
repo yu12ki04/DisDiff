@@ -9,7 +9,7 @@ model:
     timesteps: 1000
     loss_type: l1
     first_stage_key: "image"
-    cond_stage_key: "image"
+    cond_stage_key: "text"
     image_size: 16
     channels: 3
     cond_stage_trainable: true
@@ -74,12 +74,21 @@ model:
           target: torch.nn.Identity
 
     cond_stage_config:
-      target: ldm.modules.encoders.modules.FrozenClipImageEmbedder
-      params:
-        model: 'ViT-L/14'
-        jit: false
-        device: 'cuda'
-        antialias: false
+      text_encoder:
+        target: ldm.modules.encoders.modules.FrozenCLIPTextEmbedder
+        params:
+          model: 'ViT-L/14'
+          device: 'cuda'        
+          max_length: 77        
+          n_repeat: 1           
+          normalize: true 
+      image_encoder:
+        target: ldm.modules.encoders.modules.FrozenClipImageEmbedder
+        params:
+          model: 'ViT-L/14'
+          jit: false
+          device: 'cuda'
+          antialias: false
     dis_loss_type: Z
     dis_weight: 0.05
 data:
