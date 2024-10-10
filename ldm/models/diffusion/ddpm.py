@@ -29,6 +29,7 @@ from ldm.modules.diffusionmodules.util import return_wrap
 import copy
 import os
 import pandas as pd
+from omegaconf import OmegaConf
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
@@ -559,7 +560,7 @@ class LatentDiffusion(DDPM):
             assert config != '__is_first_stage__'
             assert config != '__is_unconditional__'
             # configが辞書形式の場合、二つのエンコーダをインスタンス化
-            if isinstance(config, dict):
+            if OmegaConf.is_dict(config) and ('text_encoder' in config or 'image_encoder' in config):
                 self.cond_stage_model = {}
                 for encoder_name, encoder_config in config.items():
                     model = instantiate_from_config(encoder_config)
@@ -717,7 +718,7 @@ class LatentDiffusion(DDPM):
             if cond_key is None:#ここも実行
                 cond_key = self.cond_stage_key #"text"を指定
             if cond_key != self.first_stage_key: #"image"と違うから実行
-                if cond_key in ['caption', 'coordinates_bbox']:
+                if cond_key in ['text','caption', 'coordinates_bbox']:
                     xc = batch[cond_key]
                 elif cond_key == 'class_label':
                     xc = batch
@@ -1583,7 +1584,12 @@ class LatentDiffusion(DDPM):
         params = list(self.model.parameters())
         if self.cond_stage_trainable:
             print(f"{self.__class__.__name__}: Also optimizing conditioner params!")
-            params = params + list(self.cond_stage_model.parameters())
+            # cond_stage_modelが辞書形式であるかどうかをチェック
+            if isinstance(self.cond_stage_model, dict):
+                for encoder_name, encoder_model in self.cond_stage_model.items():
+                    params += list(encoder_model.parameters())
+            else:
+                params += list(self.cond_stage_model.parameters())
         if self.learn_logvar:
             print('Diffusion model optimizing logvar')
             params.append(self.logvar)

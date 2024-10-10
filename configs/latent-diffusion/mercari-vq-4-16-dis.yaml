@@ -77,7 +77,7 @@ model:
       text_encoder:
         target: ldm.modules.encoders.modules.FrozenCLIPTextEmbedder
         params:
-          model: 'ViT-L/14'
+          version: 'ViT-L/14'
           device: 'cuda'        
           max_length: 77        
           n_repeat: 1           
@@ -99,12 +99,8 @@ data:
     num_workers: 8
     train:
       target: ldm.data.dis.Mercaritrain_clip
-      params:
-        path: './data/1010.lmdb'
     test:
       target: ldm.data.dis.Mercaritrain_clip
-      params:
-        path: './data/1010.lmdb'
 
 lightning:
   callbacks:

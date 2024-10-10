@@ -141,7 +141,7 @@ class FrozenCLIPTextEmbedder(nn.Module):
     """
     def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
         super().__init__()
-        self.model, _ = clip.load(version, jit=False, device="cpu")
+        self.model, _ = clip.load(version, jit=False, device=device)
         self.device = device
         self.max_length = max_length
         self.n_repeat = n_repeat
@@ -165,6 +165,43 @@ class FrozenCLIPTextEmbedder(nn.Module):
             z = z[:, None, :]
         z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
         return z
+    
+# # class FrozenCLIPTextEmbedder(nn.Module):
+#     """
+#     Uses the CLIP text encoder.
+#     """
+#     def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True,latent_dim=32):
+#         super().__init__()
+#         self.model, _ = clip.load(version, jit=False, device=device)
+#         self.device = device
+#         self.max_length = max_length
+#         self.n_repeat = n_repeat
+#         self.normalize = normalize
+#         # 最終層の線形変換
+#         self.latent_dim = latent_dim
+#         self.linear = nn.Linear(768, self.latent_dim).to(self.device) # 768はViT-L/14の出力次元
+
+#     def freeze(self):
+#         self.model = self.model.eval()
+#         for param in self.parameters():
+#             param.requires_grad = False
+
+#     def forward(self, text):
+#         tokens = clip.tokenize(text).to(self.device)
+#         z = self.model.encode_text(tokens).float().to(self.device)
+#         if self.normalize:
+#             z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+#         z = z.view(z.size(0), -1)  # (batch_size, 768)
+#         # 最終層の線形変換
+#         z = self.linear(z)  # (batch_size, latent_dim)
+#         return z
+
+#     def encode(self, text):
+#         z = self(text)
+#         if z.ndim==2:
+#             z = z[:, None, :]
+#         z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
+#         return z
 
 class FrozenClipImageEmbedder(nn.Module):
     """

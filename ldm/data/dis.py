@@ -486,7 +486,7 @@ class Mercarilmdb_clip(Dataset):
                  crop_d2c: bool = False,
                  **kwargs):
         self.original_resolution = original_resolution
-        self.data = BaseLMDB(path, original_resolution, zfill=7)
+        self.data = BaseLMDB_clip(path, original_resolution, zfill=7)
         self.length = len(self.data)
         self.crop_d2c = crop_d2c
 
@@ -689,7 +689,7 @@ class Mercaritrain(Mercarilmdb):
         
 class Mercaritrain_clip(Mercarilmdb_clip):
     def __init__(self, **kwargs):
-        super().__init__(path= './data/1010.lmdb',# change '/path/to/your/datasets/',
+        super().__init__(path= './data/1010_small.lmdb',# change '/path/to/your/datasets/',
                 image_size=64,
                 original_resolution=128,
                 crop_d2c=False,
