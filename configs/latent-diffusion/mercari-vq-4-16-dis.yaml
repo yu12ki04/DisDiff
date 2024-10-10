@@ -98,10 +98,14 @@ data:
     wrap: True
     num_workers: 8
     train:
-      target: ldm.data.dis.Mercaritrain
+      target: ldm.data.dis.Mercaritrain_clip
+      params:
+        path: './data/1010.lmdb'
     test:
-      target: ldm.data.dis.Mercaritrain
-
+      target: ldm.data.dis.Mercaritrain_clip
+      params:
+        path: './data/1010.lmdb'
+        
 lightning:
   callbacks:
     image_logger:
