@@ -180,7 +180,10 @@ class FrozenCLIPTextEmbedder(nn.Module):
         # 最終層の線形変換
         self.latent_dim = latent_dim
         self.linear = nn.Linear(768, self.latent_dim).to(self.device) # 768はViT-L/14の出力次元
-
+        # CLIPのパラメータをfreeze
+        for param in self.model.parameters():
+            param.requires_grad = False
+            
     def freeze(self):
         self.model = self.model.eval()
         for param in self.parameters():
