@@ -134,52 +134,18 @@ class SpatialRescaler(nn.Module):
     def encode(self, x):
         return self(x)
 
-
-class FrozenCLIPTextEmbedder(nn.Module):
-    """
-    Uses the CLIP text encoder.
-    """
-    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
-        super().__init__()
-        self.model, _ = clip.load(version, jit=False, device=device)
-        self.device = device
-        self.max_length = max_length
-        self.n_repeat = n_repeat
-        self.normalize = normalize
-
-    def freeze(self):
-        self.model = self.model.eval()
-        for param in self.parameters():
-            param.requires_grad = False
-
-    def forward(self, text):
-        tokens = clip.tokenize(text).to(self.device)
-        z = self.model.encode_text(tokens)
-        if self.normalize:
-            z = z / torch.linalg.norm(z, dim=1, keepdim=True)
-        return z
-
-    def encode(self, text):
-        z = self(text)
-        if z.ndim==2:
-            z = z[:, None, :]
-        z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
-        return z
-    
-# # class FrozenCLIPTextEmbedder(nn.Module):
+# 元の
+# class FrozenCLIPTextEmbedder(nn.Module):
 #     """
 #     Uses the CLIP text encoder.
 #     """
-#     def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True,latent_dim=32):
+#     def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
 #         super().__init__()
 #         self.model, _ = clip.load(version, jit=False, device=device)
 #         self.device = device
 #         self.max_length = max_length
 #         self.n_repeat = n_repeat
 #         self.normalize = normalize
-#         # 最終層の線形変換
-#         self.latent_dim = latent_dim
-#         self.linear = nn.Linear(768, self.latent_dim).to(self.device) # 768はViT-L/14の出力次元
 
 #     def freeze(self):
 #         self.model = self.model.eval()
@@ -188,12 +154,9 @@ class FrozenCLIPTextEmbedder(nn.Module):
 
 #     def forward(self, text):
 #         tokens = clip.tokenize(text).to(self.device)
-#         z = self.model.encode_text(tokens).float().to(self.device)
+#         z = self.model.encode_text(tokens)
 #         if self.normalize:
 #             z = z / torch.linalg.norm(z, dim=1, keepdim=True)
-#         z = z.view(z.size(0), -1)  # (batch_size, 768)
-#         # 最終層の線形変換
-#         z = self.linear(z)  # (batch_size, latent_dim)
 #         return z
 
 #     def encode(self, text):
@@ -202,6 +165,78 @@ class FrozenCLIPTextEmbedder(nn.Module):
 #             z = z[:, None, :]
 #         z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
 #         return z
+    
+class FrozenCLIPTextEmbedder(nn.Module):
+    """
+    Uses the CLIP text encoder.
+    """
+    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True,latent_dim=32):
+        super().__init__()
+        self.model, _ = clip.load(version, jit=False, device=device)
+        self.device = device
+        self.max_length = max_length
+        self.n_repeat = n_repeat
+        self.normalize = normalize
+        # 最終層の線形変換
+        self.latent_dim = latent_dim
+        self.linear = nn.Linear(768, self.latent_dim).to(self.device) # 768はViT-L/14の出力次元
+
+    def freeze(self):
+        self.model = self.model.eval()
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def forward(self, text):
+        tokens = clip.tokenize(text).to(self.device)
+        z = self.model.encode_text(tokens).float().to(self.device)
+        if self.normalize:
+            z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+        z = z.view(z.size(0), -1)  # (batch_size, 768)
+        # 最終層の線形変換
+        z = self.linear(z)  # (batch_size, latent_dim)
+        return z
+
+    def encode(self, text):
+        z = self(text)
+        # if z.ndim==2:　# この処理が邪魔をしてた．でもなぜ必要かわからない．
+        #     z = z[:, None, :]
+        # z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
+        return z
+
+# 元の
+# class FrozenClipImageEmbedder(nn.Module):
+#     """
+#         Uses the CLIP image encoder.
+#         """
+#     def __init__(
+#             self,
+#             model,
+#             jit=False,
+#             device='cuda' if torch.cuda.is_available() else 'cpu',
+#             antialias=False,
+#         ):
+#         super().__init__()
+#         self.model, _ = clip.load(name=model, device=device, jit=jit)
+
+#         self.antialias = antialias
+
+#         self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
+#         self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
+
+#     def preprocess(self, x):
+#         # normalize to [0,1]
+#         x = kornia.geometry.resize(x, (224, 224),
+#                                    interpolation='bicubic',align_corners=True,
+#                                    antialias=self.antialias)
+#         x = (x + 1.) / 2.
+#         # renormalize according to clip
+#         x = kornia.enhance.normalize(x, self.mean, self.std)
+#         return x
+
+#     def forward(self, x):
+#         # x is assumed to be in range [-1,1]
+#         return self.model.encode_image(self.preprocess(x))
+    
 
 class FrozenClipImageEmbedder(nn.Module):
     """
@@ -213,14 +248,21 @@ class FrozenClipImageEmbedder(nn.Module):
             jit=False,
             device='cuda' if torch.cuda.is_available() else 'cpu',
             antialias=False,
+            latent_dim=192,
         ):
         super().__init__()
         self.model, _ = clip.load(name=model, device=device, jit=jit)
+        self.latent_dim = latent_dim
+        self.device = device
 
         self.antialias = antialias
 
         self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
         self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
+
+
+        # 最終層の線形変換
+        self.linear = nn.Linear(768, self.latent_dim).to(self.device)  # 768はViT-L/14の出力次元
 
     def preprocess(self, x):
         # normalize to [0,1]
@@ -234,7 +276,12 @@ class FrozenClipImageEmbedder(nn.Module):
 
     def forward(self, x):
         # x is assumed to be in range [-1,1]
-        return self.model.encode_image(self.preprocess(x))
+        z = self.model.encode_image(self.preprocess(x)).float().to(self.device)
+        # 形状を調整
+        z = z.view(z.size(0), -1)  # (batch_size, 768)
+        # 最終層の線形変換
+        z = self.linear(z)  # (batch_size, latent_dim)
+        return z
 
 
 # class FrozenClipImageEmbedder(nn.Module):

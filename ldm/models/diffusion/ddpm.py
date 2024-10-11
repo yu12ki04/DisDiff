@@ -945,7 +945,7 @@ class LatentDiffusion(DDPM):
             # combined_output = self.combine_encoders(text_output, image_output)
             # return combined_output
         else:
-            if not isinstance(cond, list):
+            if not isinstance(cond, list):# and not isinstance(cond, torch.Tensor):
                 cond = [cond]
             key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
             cond = {key: cond}
@@ -1083,9 +1083,14 @@ class LatentDiffusion(DDPM):
 
     def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):
         if not self.train_enc_flag:
-            eval_encoder = copy.deepcopy(self.cond_stage_model)
-            eval_encoder.requires_grad_(False)
-            eval_encoder.eval()
+            if isinstance(self.cond_stage_model, dict):     
+                eval_encoder = self.cond_stage_model["image_encoder"]
+                eval_encoder.requires_grad_(False)
+                eval_encoder.eval()
+            else:
+                eval_encoder = copy.deepcopy(self.cond_stage_model)
+                eval_encoder.requires_grad_(False)
+                eval_encoder.eval()
         else:
             if isinstance(self.cond_stage_model, dict):     
                 eval_encoder = self.cond_stage_model["image_encoder"]
@@ -1641,8 +1646,8 @@ class DiffusionWrapper(pl.LightningModule):
             xc = torch.cat([x] + c_concat, dim=1)
             cc = torch.cat(c_crossattn, 1)
             out = self.diffusion_model(xc, t, context=cc)
-        elif self.conditioning_key == 'adm':
-            cc = c_crossattn[0]
+        elif self.conditioning_key == 'adm':# ここが実行
+            cc = c_crossattn[0]# ccにはtextのエンコードされた条件が入る
             model_kwargs = {}
             if sampled_concept is not None:
                 model_kwargs["sampled_concept"] = sampled_concept

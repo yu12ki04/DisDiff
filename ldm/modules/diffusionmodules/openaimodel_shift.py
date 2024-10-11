@@ -659,10 +659,10 @@ class UNetModel(nn.Module):
 
         time_embed_dim = model_channels * 4
         self.time_embed_dim = time_embed_dim
-        if self.seprate_decoder:
-            self.repre_embed = linear(self.repre_emb_channels, self.time_embed_dim)
+        if self.seprate_decoder:# こっちが呼ばれる
+            self.repre_embed = linear(self.repre_emb_channels, self.time_embed_dim) # 32, 256
             if not self.wo_part_emb:
-                if self.orth_emb:
+                if self.orth_emb:# ここが呼ばれる
                     emb_weight = th.randn([self.time_embed_dim//2, self.time_embed_dim//2])
                     self.part_latents = nn.Embedding.from_pretrained(emb_weight,freeze=False)
                     self.part_emb = linear(self.time_embed_dim//2, self.time_embed_dim)

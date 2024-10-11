@@ -80,7 +80,7 @@ model:
           version: 'ViT-L/14'
           device: 'cuda'        
           max_length: 77        
-          n_repeat: 1           
+          n_repeat: 2
           normalize: true 
       image_encoder:
         target: ldm.modules.encoders.modules.FrozenClipImageEmbedder
