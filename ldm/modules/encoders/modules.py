@@ -170,7 +170,7 @@ class FrozenCLIPTextEmbedder(nn.Module):
     """
     Uses the CLIP text encoder.
     """
-    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True,latent_dim=32):
+    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True,latent_dim=192):
         super().__init__()
         self.model, _ = clip.load(version, jit=False, device=device)
         self.device = device
@@ -183,7 +183,7 @@ class FrozenCLIPTextEmbedder(nn.Module):
         # CLIPのパラメータをfreeze
         for param in self.model.parameters():
             param.requires_grad = False
-            
+
     def freeze(self):
         self.model = self.model.eval()
         for param in self.parameters():
