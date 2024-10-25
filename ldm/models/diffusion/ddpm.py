@@ -1512,6 +1512,7 @@ class LatentDiffusion(DDPM):
                 for cdx in range(self.model.diffusion_model.latent_unit):
                     swapped_c = c.clone()
                     swapped_c = torch.stack(swapped_c.chunk(self.model.diffusion_model.latent_unit, dim=1), dim=1)
+                    swapped_c = torch.squeeze(swapped_c)
                     swapped_c[:,cdx] = swapped_c[0,cdx][None,:].repeat(c.shape[0],1)
                     samples, z_denoise_row = self.sample_log(cond=swapped_c.reshape(c.shape[0],-1),batch_size=N,ddim=use_ddim,
                                                             ddim_steps=ddim_steps,eta=ddim_eta)
@@ -1524,6 +1525,7 @@ class LatentDiffusion(DDPM):
                 for cdx in range(self.model.diffusion_model.latent_unit):
                     swapped_c = c.clone()
                     swapped_c = torch.stack(swapped_c.chunk(self.model.diffusion_model.latent_unit, dim=1), dim=1)
+                    swapped_c = torch.squeeze(swapped_c)
                     swapped_c[:,cdx] = swapped_c[0,cdx][None,:].repeat(c.shape[0],1)
                     samples, z_denoise_row = self.sample_log(cond=swapped_c.reshape(c.shape[0],-1),batch_size=N,ddim=use_ddim,
                                                             ddim_steps=ddim_steps,eta=ddim_eta, sampled_index=np.array([cdx]*N))
