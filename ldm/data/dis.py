@@ -358,7 +358,7 @@ class BaseLMDB_clip(Dataset):
         # text = text_bytes.decode('utf-8')
         # テキストをデコードして "|" で分割してリスト化
         text = text_bytes.decode('utf-8').split('|')
-        
+
         return img, text
 
 
@@ -691,7 +691,7 @@ class Mercaritrain(Mercarilmdb):
         
 class Mercaritrain_clip(Mercarilmdb_clip):
     def __init__(self, **kwargs):
-        super().__init__(path= './data/1015.lmdb',# change '/path/to/your/datasets/',
+        super().__init__(path= './data/1017.lmdb',# change '/path/to/your/datasets/',
                 image_size=64,
                 original_resolution=128,
                 crop_d2c=False,

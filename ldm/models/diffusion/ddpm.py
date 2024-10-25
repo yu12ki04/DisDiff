@@ -1123,6 +1123,7 @@ class LatentDiffusion(DDPM):
         cond = cond.chunk(self.model.diffusion_model.latent_unit, dim=1)
         pred_z_new = torch.stack(z_parts, dim=1)
         cond = torch.stack(cond, dim=1)
+        cond = torch.squeeze(cond)
 
 
         with torch.no_grad():
