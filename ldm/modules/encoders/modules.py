@@ -170,7 +170,7 @@ class FrozenCLIPTextEmbedder(nn.Module):
     """
     Uses the CLIP text encoder.
     """
-    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True,latent_dim=192):
+    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True,latent_dim=32):
         super().__init__()
         self.model, _ = clip.load(version, jit=False, device=device)
         self.device = device
@@ -189,14 +189,34 @@ class FrozenCLIPTextEmbedder(nn.Module):
         for param in self.parameters():
             param.requires_grad = False
 
+    # def forward(self, text):
+    #     tokens = clip.tokenize(text).to(self.device)
+    #     z = self.model.encode_text(tokens).float().to(self.device)
+    #     if self.normalize:
+    #         z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+    #     z = z.view(z.size(0), -1)  # (batch_size, 768)
+    #     # 最終層の線形変換
+    #     z = self.linear(z)  # (batch_size, latent_dim)
+    #     return z
     def forward(self, text):
-        tokens = clip.tokenize(text).to(self.device)
-        z = self.model.encode_text(tokens).float().to(self.device)
-        if self.normalize:
-            z = z / torch.linalg.norm(z, dim=1, keepdim=True)
-        z = z.view(z.size(0), -1)  # (batch_size, 768)
-        # 最終層の線形変換
-        z = self.linear(z)  # (batch_size, latent_dim)
+        if isinstance(text[0], list):  # 2次元入力の場合
+            encoded_texts = []
+            for batch in text:
+                tokens = clip.tokenize(batch).to(self.device)
+                z = self.model.encode_text(tokens).float()
+                if self.normalize:
+                    z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+                z = self.linear(z)  # (text_per_batch, latent_dim)
+                encoded_texts.append(z)
+            z = torch.stack(encoded_texts)  # (batch_size, text_per_batch, latent_dim)
+        else:  # 1次元入力の場合
+            tokens = clip.tokenize(text).to(self.device)
+            z = self.model.encode_text(tokens).float()
+            if self.normalize:
+                z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+            z = z.view(z.size(0), -1)  # (batch_size, 768)
+            z = self.linear(z)  # (batch_size, latent_dim)
+
         return z
 
     def encode(self, text):

@@ -706,8 +706,8 @@ class LatentDiffusion(DDPM):
     @torch.no_grad()
     def get_input(self, batch, k, return_first_stage_outputs=False, force_c_encode=False,
                   cond_key=None, return_original_cond=False, bs=None):
-        x = super().get_input(batch, k)
-        if bs is not None:
+        x = super().get_input(batch, k)# k: self.first_stage_key = 'image' # 画像のバッチデータが返ってくる
+        if bs is not None:# Noneだから実行しない
             x = x[:bs]
         x = x.to(self.device)
         encoder_posterior = self.encode_first_stage(x)
@@ -718,7 +718,7 @@ class LatentDiffusion(DDPM):
             if cond_key is None:#ここも実行
                 cond_key = self.cond_stage_key #"text"を指定
             if cond_key != self.first_stage_key: #"image"と違うから実行
-                if cond_key in ['text','caption', 'coordinates_bbox']:
+                if cond_key in ['text','caption', 'coordinates_bbox','text_label']:
                     xc = batch[cond_key]
                 elif cond_key == 'class_label':
                     xc = batch
@@ -909,7 +909,7 @@ class LatentDiffusion(DDPM):
             return self.first_stage_model.encode(x)
 
     def shared_step(self, batch, **kwargs):
-        x, c = self.get_input(batch, self.first_stage_key)# ここで帰ってくるのは，x(最初のエンコードされたz)とc(条件付けのtext)
+        x, c = self.get_input(batch, self.first_stage_key)# self.first_stage_key = 'image'
         loss = self(x, c)
         return loss
 
@@ -1081,7 +1081,7 @@ class LatentDiffusion(DDPM):
         os.mkdir(os.path.join(self.logdir, "dis_repre"))
         np.savez(cond_dir, latents=cond_cat.numpy(), num_samples= np.array(self.global_step))
 
-    def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):
+    def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):# sampled_conceptはlatent_unitの内，値を一つランダムに抽出したもの
         if not self.train_enc_flag:
             if isinstance(self.cond_stage_model, dict):     
                 eval_encoder = self.cond_stage_model["image_encoder"]
@@ -1150,8 +1150,8 @@ class LatentDiffusion(DDPM):
     def p_losses(self, x_start, cond, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        if self.dis_loss_flag:
-            sampled_concept = np.random.randint(self.model.diffusion_model.latent_unit, size = x_noisy.shape[0])
+        if self.dis_loss_flag:# dis_lossを用いた学習をする時は全てこちら
+            sampled_concept = np.random.randint(self.model.diffusion_model.latent_unit, size = x_noisy.shape[0])#latent_unitの指定する値をランダムに抽出
             model_output = self.apply_model(x_noisy, t, cond, sampled_concept = sampled_concept)
             dis_loss = self.dis_loss(model_output, x_noisy, t, cond, sampled_concept)
                 

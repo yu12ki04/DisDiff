@@ -354,9 +354,11 @@ class BaseLMDB_clip(Dataset):
         except (IOError, SyntaxError) as e:
             raise ValueError(f"Failed to load image from buffer for key: {img_key}, error: {e}")
 
-        # テキストをデコード
-        text = text_bytes.decode('utf-8')
-
+        # # テキストをデコード
+        # text = text_bytes.decode('utf-8')
+        # テキストをデコードして "|" で分割してリスト化
+        text = text_bytes.decode('utf-8').split('|')
+        
         return img, text
 
 

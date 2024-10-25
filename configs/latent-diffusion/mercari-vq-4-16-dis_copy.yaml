@@ -9,7 +9,7 @@ model:
     timesteps: 1000
     loss_type: l1
     first_stage_key: "image"
-    cond_stage_key: "text_label"
+    cond_stage_key: "text"
     image_size: 16
     channels: 3
     cond_stage_trainable: true
