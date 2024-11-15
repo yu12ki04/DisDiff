@@ -29,6 +29,7 @@ from ldm.modules.diffusionmodules.util import return_wrap
 import copy
 import os
 import pandas as pd
+from omegaconf import OmegaConf
 
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
@@ -558,8 +559,18 @@ class LatentDiffusion(DDPM):
         else:
             assert config != '__is_first_stage__'
             assert config != '__is_unconditional__'
-            model = instantiate_from_config(config)
-            self.cond_stage_model = model
+            # configが辞書形式の場合、二つのエンコーダをインスタンス化
+            if OmegaConf.is_dict(config) and ('text_encoder' in config or 'image_encoder' in config):
+                self.cond_stage_model = {}
+                for encoder_name, encoder_config in config.items():
+                    model = instantiate_from_config(encoder_config)
+                    self.cond_stage_model[encoder_name] = model
+            else:
+                model = instantiate_from_config(config)
+                self.cond_stage_model = model                
+            # change
+            # model = instantiate_from_config(config)
+            # self.cond_stage_model = model
 
     def _get_denoise_row_from_list(self, samples, desc='', force_no_decoder_quantization=False):
         denoise_row = []
@@ -582,14 +593,22 @@ class LatentDiffusion(DDPM):
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
         return self.scale_factor * z
 
-    def get_learned_conditioning(self, c):
-        if self.cond_stage_forward is None:
-            if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
-                c = self.cond_stage_model.encode(c)
-                if isinstance(c, DiagonalGaussianDistribution):
-                    c = c.mode()
-            else:
-                c = self.cond_stage_model(c)
+    def get_learned_conditioning(self, c, use_eval_encoder = False):
+        if self.cond_stage_forward is None:# どこにもないからこれが実行
+            if isinstance(self.cond_stage_model, dict):
+                if not use_eval_encoder:# text encoderはこちらが実行
+                    c = self.cond_stage_model["text_encoder"].encode(c)
+                    if isinstance(c, DiagonalGaussianDistribution):
+                        c = c.mode()
+                else: # image encoderはこちらが実行
+                    c = self.cond_stage_model["image_encoder"](c)
+            else:# change
+                if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):# text encoderはこちらが実行
+                    c = self.cond_stage_model.encode(c)
+                    if isinstance(c, DiagonalGaussianDistribution):
+                        c = c.mode()
+                else: # image encoderはこちらが実行
+                    c = self.cond_stage_model(c)
         else:
             assert hasattr(self.cond_stage_model, self.cond_stage_forward)
             c = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
@@ -687,32 +706,33 @@ class LatentDiffusion(DDPM):
     @torch.no_grad()
     def get_input(self, batch, k, return_first_stage_outputs=False, force_c_encode=False,
                   cond_key=None, return_original_cond=False, bs=None):
-        x = super().get_input(batch, k)
-        if bs is not None:
+        x = super().get_input(batch, k)# k: self.first_stage_key = 'image' # 画像のバッチデータが返ってくる
+        if bs is not None:# Noneだから実行しない
             x = x[:bs]
         x = x.to(self.device)
         encoder_posterior = self.encode_first_stage(x)
         z = self.get_first_stage_encoding(encoder_posterior).detach()
+        #ここまでok
 
-        if self.model.conditioning_key is not None:
-            if cond_key is None:
-                cond_key = self.cond_stage_key
-            if cond_key != self.first_stage_key:
-                if cond_key in ['caption', 'coordinates_bbox']:
+        if self.model.conditioning_key is not None: #こちらが実行
+            if cond_key is None:#ここも実行
+                cond_key = self.cond_stage_key #"text"を指定
+            if cond_key != self.first_stage_key: #"image"と違うから実行
+                if cond_key in ['text','caption', 'coordinates_bbox','text_label']:
                     xc = batch[cond_key]
                 elif cond_key == 'class_label':
                     xc = batch
-                else:
+                else:# ここでtextに対応するデータをバッチから取ってくる
                     xc = super().get_input(batch, cond_key).to(self.device)
             else:
                 xc = x
-            if not self.cond_stage_trainable or force_c_encode:
+            if not self.cond_stage_trainable or force_c_encode:#ここは実行されない
                 if isinstance(xc, dict) or isinstance(xc, list):
                     # import pudb; pudb.set_trace()
                     c = self.get_learned_conditioning(xc)
                 else:
                     c = self.get_learned_conditioning(xc.to(self.device))
-            else:
+            else:# ということはこっち
                 c = xc
             if bs is not None:
                 c = c[:bs]
@@ -889,16 +909,16 @@ class LatentDiffusion(DDPM):
             return self.first_stage_model.encode(x)
 
     def shared_step(self, batch, **kwargs):
-        x, c = self.get_input(batch, self.first_stage_key)
+        x, c = self.get_input(batch, self.first_stage_key)# self.first_stage_key = 'image'
         loss = self(x, c)
         return loss
 
     def forward(self, x, c, *args, **kwargs):
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        if self.model.conditioning_key is not None:
+        if self.model.conditioning_key is not None:#あるので実行
             assert c is not None
-            if self.cond_stage_trainable:
-                c = self.get_learned_conditioning(c)
+            if self.cond_stage_trainable:# trueのため実行
+                c = self.get_learned_conditioning(c) #条件のエンコードを取りに行く
             if self.shorten_cond_schedule:  # TODO: drop this option
                 tc = self.cond_ids[t].to(self.device)
                 c = self.q_sample(x_start=c, t=tc, noise=torch.randn_like(c.float()))
@@ -919,8 +939,13 @@ class LatentDiffusion(DDPM):
         if isinstance(cond, dict):
             # hybrid case, cond is exptected to be a dict
             pass
+            # text_output = cond['text_encoder'](x_noisy)  # テキストエンコーダを使用
+            # image_output = cond['image_encoder'](x_noisy)  # 画像エンコーダを使用
+            # # ここで、text_output と image_output を組み合わせる処理を追加することができます
+            # combined_output = self.combine_encoders(text_output, image_output)
+            # return combined_output
         else:
-            if not isinstance(cond, list):
+            if not isinstance(cond, list):# and not isinstance(cond, torch.Tensor):
                 cond = [cond]
             key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
             cond = {key: cond}
@@ -1056,13 +1081,22 @@ class LatentDiffusion(DDPM):
         os.mkdir(os.path.join(self.logdir, "dis_repre"))
         np.savez(cond_dir, latents=cond_cat.numpy(), num_samples= np.array(self.global_step))
 
-    def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):
+    def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):# sampled_conceptはlatent_unitの内，値を一つランダムに抽出したもの
         if not self.train_enc_flag:
-            eval_encoder = copy.deepcopy(self.cond_stage_model)
-            eval_encoder.requires_grad_(False)
-            eval_encoder.eval()
+            if isinstance(self.cond_stage_model, dict):     
+                eval_encoder = self.cond_stage_model["image_encoder"]
+                eval_encoder.requires_grad_(False)
+                eval_encoder.eval()
+            else:
+                eval_encoder = copy.deepcopy(self.cond_stage_model)
+                eval_encoder.requires_grad_(False)
+                eval_encoder.eval()
         else:
-            eval_encoder = self.cond_stage_model
+            if isinstance(self.cond_stage_model, dict):     
+                eval_encoder = self.cond_stage_model["image_encoder"]
+
+            else:       
+                eval_encoder = self.cond_stage_model
 
         ddim_coef = extract_into_tensor(self.ddim_coef, t, x_t.shape)
         with torch.no_grad():
@@ -1089,6 +1123,7 @@ class LatentDiffusion(DDPM):
         cond = cond.chunk(self.model.diffusion_model.latent_unit, dim=1)
         pred_z_new = torch.stack(z_parts, dim=1)
         cond = torch.stack(cond, dim=1)
+        cond = torch.squeeze(cond)
 
 
         with torch.no_grad():
@@ -1116,8 +1151,8 @@ class LatentDiffusion(DDPM):
     def p_losses(self, x_start, cond, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        if self.dis_loss_flag:
-            sampled_concept = np.random.randint(self.model.diffusion_model.latent_unit, size = x_noisy.shape[0])
+        if self.dis_loss_flag:# dis_lossを用いた学習をする時は全てこちら
+            sampled_concept = np.random.randint(self.model.diffusion_model.latent_unit, size = x_noisy.shape[0])#latent_unitの指定する値をランダムに抽出
             model_output = self.apply_model(x_noisy, t, cond, sampled_concept = sampled_concept)
             dis_loss = self.dis_loss(model_output, x_noisy, t, cond, sampled_concept)
                 
@@ -1477,6 +1512,7 @@ class LatentDiffusion(DDPM):
                 for cdx in range(self.model.diffusion_model.latent_unit):
                     swapped_c = c.clone()
                     swapped_c = torch.stack(swapped_c.chunk(self.model.diffusion_model.latent_unit, dim=1), dim=1)
+                    swapped_c = torch.squeeze(swapped_c)
                     swapped_c[:,cdx] = swapped_c[0,cdx][None,:].repeat(c.shape[0],1)
                     samples, z_denoise_row = self.sample_log(cond=swapped_c.reshape(c.shape[0],-1),batch_size=N,ddim=use_ddim,
                                                             ddim_steps=ddim_steps,eta=ddim_eta)
@@ -1489,6 +1525,7 @@ class LatentDiffusion(DDPM):
                 for cdx in range(self.model.diffusion_model.latent_unit):
                     swapped_c = c.clone()
                     swapped_c = torch.stack(swapped_c.chunk(self.model.diffusion_model.latent_unit, dim=1), dim=1)
+                    swapped_c = torch.squeeze(swapped_c)
                     swapped_c[:,cdx] = swapped_c[0,cdx][None,:].repeat(c.shape[0],1)
                     samples, z_denoise_row = self.sample_log(cond=swapped_c.reshape(c.shape[0],-1),batch_size=N,ddim=use_ddim,
                                                             ddim_steps=ddim_steps,eta=ddim_eta, sampled_index=np.array([cdx]*N))
@@ -1555,7 +1592,12 @@ class LatentDiffusion(DDPM):
         params = list(self.model.parameters())
         if self.cond_stage_trainable:
             print(f"{self.__class__.__name__}: Also optimizing conditioner params!")
-            params = params + list(self.cond_stage_model.parameters())
+            # cond_stage_modelが辞書形式であるかどうかをチェック
+            if isinstance(self.cond_stage_model, dict):
+                for encoder_name, encoder_model in self.cond_stage_model.items():
+                    params += list(encoder_model.parameters())
+            else:
+                params += list(self.cond_stage_model.parameters())
         if self.learn_logvar:
             print('Diffusion model optimizing logvar')
             params.append(self.logvar)
@@ -1607,8 +1649,8 @@ class DiffusionWrapper(pl.LightningModule):
             xc = torch.cat([x] + c_concat, dim=1)
             cc = torch.cat(c_crossattn, 1)
             out = self.diffusion_model(xc, t, context=cc)
-        elif self.conditioning_key == 'adm':
-            cc = c_crossattn[0]
+        elif self.conditioning_key == 'adm':# ここが実行
+            cc = c_crossattn[0]# ccにはtextのエンコードされた条件が入る
             model_kwargs = {}
             if sampled_concept is not None:
                 model_kwargs["sampled_concept"] = sampled_concept

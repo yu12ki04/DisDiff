@@ -134,38 +134,132 @@ class SpatialRescaler(nn.Module):
     def encode(self, x):
         return self(x)
 
+# 元の
+# class FrozenCLIPTextEmbedder(nn.Module):
+#     """
+#     Uses the CLIP text encoder.
+#     """
+#     def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
+#         super().__init__()
+#         self.model, _ = clip.load(version, jit=False, device=device)
+#         self.device = device
+#         self.max_length = max_length
+#         self.n_repeat = n_repeat
+#         self.normalize = normalize
 
+#     def freeze(self):
+#         self.model = self.model.eval()
+#         for param in self.parameters():
+#             param.requires_grad = False
+
+#     def forward(self, text):
+#         tokens = clip.tokenize(text).to(self.device)
+#         z = self.model.encode_text(tokens)
+#         if self.normalize:
+#             z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+#         return z
+
+#     def encode(self, text):
+#         z = self(text)
+#         if z.ndim==2:
+#             z = z[:, None, :]
+#         z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
+#         return z
+    
 class FrozenCLIPTextEmbedder(nn.Module):
     """
-    Uses the CLIP transformer encoder for text.
+    Uses the CLIP text encoder.
     """
-    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
+    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True,latent_dim=32):
         super().__init__()
-        self.model, _ = clip.load(version, jit=False, device="cpu")
+        self.model, _ = clip.load(version, jit=False, device=device)
         self.device = device
         self.max_length = max_length
         self.n_repeat = n_repeat
         self.normalize = normalize
+        # 最終層の線形変換
+        self.latent_dim = latent_dim
+        self.linear = nn.Linear(768, self.latent_dim).to(self.device) # 768はViT-L/14の出力次元
+        # CLIPのパラメータをfreeze
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def freeze(self):
         self.model = self.model.eval()
         for param in self.parameters():
             param.requires_grad = False
 
+    # def forward(self, text):
+    #     tokens = clip.tokenize(text).to(self.device)
+    #     z = self.model.encode_text(tokens).float().to(self.device)
+    #     if self.normalize:
+    #         z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+    #     z = z.view(z.size(0), -1)  # (batch_size, 768)
+    #     # 最終層の線形変換
+    #     z = self.linear(z)  # (batch_size, latent_dim)
+    #     return z
     def forward(self, text):
-        tokens = clip.tokenize(text).to(self.device)
-        z = self.model.encode_text(tokens)
-        if self.normalize:
-            z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+        if isinstance(text[0], list):  # 2次元入力の場合
+            encoded_texts = []
+            for batch in text:
+                tokens = clip.tokenize(batch).to(self.device)
+                z = self.model.encode_text(tokens).float()
+                if self.normalize:
+                    z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+                z = self.linear(z)  # (text_per_batch, latent_dim)
+                encoded_texts.append(z)
+            z = torch.stack(encoded_texts)  # (batch_size, text_per_batch, latent_dim)
+        else:  # 1次元入力の場合
+            tokens = clip.tokenize(text).to(self.device)
+            z = self.model.encode_text(tokens).float()
+            if self.normalize:
+                z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+            z = z.view(z.size(0), -1)  # (batch_size, 768)
+            z = self.linear(z)  # (batch_size, latent_dim)
+
         return z
 
     def encode(self, text):
         z = self(text)
-        if z.ndim==2:
-            z = z[:, None, :]
-        z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
+        # if z.ndim==2:　# この処理が邪魔をしてた．でもなぜ必要かわからない．
+        #     z = z[:, None, :]
+        # z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
         return z
 
+# 元の
+# class FrozenClipImageEmbedder(nn.Module):
+#     """
+#         Uses the CLIP image encoder.
+#         """
+#     def __init__(
+#             self,
+#             model,
+#             jit=False,
+#             device='cuda' if torch.cuda.is_available() else 'cpu',
+#             antialias=False,
+#         ):
+#         super().__init__()
+#         self.model, _ = clip.load(name=model, device=device, jit=jit)
+
+#         self.antialias = antialias
+
+#         self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
+#         self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
+
+#     def preprocess(self, x):
+#         # normalize to [0,1]
+#         x = kornia.geometry.resize(x, (224, 224),
+#                                    interpolation='bicubic',align_corners=True,
+#                                    antialias=self.antialias)
+#         x = (x + 1.) / 2.
+#         # renormalize according to clip
+#         x = kornia.enhance.normalize(x, self.mean, self.std)
+#         return x
+
+#     def forward(self, x):
+#         # x is assumed to be in range [-1,1]
+#         return self.model.encode_image(self.preprocess(x))
+    
 
 class FrozenClipImageEmbedder(nn.Module):
     """
@@ -177,14 +271,21 @@ class FrozenClipImageEmbedder(nn.Module):
             jit=False,
             device='cuda' if torch.cuda.is_available() else 'cpu',
             antialias=False,
+            latent_dim=192,
         ):
         super().__init__()
         self.model, _ = clip.load(name=model, device=device, jit=jit)
+        self.latent_dim = latent_dim
+        self.device = device
 
         self.antialias = antialias
 
         self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
         self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
+
+
+        # 最終層の線形変換
+        self.linear = nn.Linear(768, self.latent_dim).to(self.device)  # 768はViT-L/14の出力次元
 
     def preprocess(self, x):
         # normalize to [0,1]
@@ -198,7 +299,141 @@ class FrozenClipImageEmbedder(nn.Module):
 
     def forward(self, x):
         # x is assumed to be in range [-1,1]
-        return self.model.encode_image(self.preprocess(x))
+        z = self.model.encode_image(self.preprocess(x)).float().to(self.device)
+        # 形状を調整
+        z = z.view(z.size(0), -1)  # (batch_size, 768)
+        # 最終層の線形変換
+        z = self.linear(z)  # (batch_size, latent_dim)
+        return z
+
+
+# class FrozenClipImageEmbedder(nn.Module):
+#     """
+#     Uses the CLIP image encoder.
+#     """
+#     def __init__(
+#             self,
+#             model,
+#             latent_dim=192,  # Encoder4と同じlatent_dimを使用
+#             jit=False,
+#             device='cuda' if torch.cuda.is_available() else 'cpu',
+#             antialias=False,
+#         ):
+#         super().__init__()
+#         self.model, _ = clip.load(name=model, device=device, jit=jit)
+
+#         self.antialias = antialias
+#         self.latent_dim = latent_dim
+
+#         self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
+#         self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
+
+#         # パラメータを凍結
+#         self.freeze()
+
+#         # 最終層の線形変換
+#         self.linear = nn.Linear(768, self.latent_dim)  # 768はViT-L/14の出力次元
+
+#     def freeze(self):
+#         self.model = self.model.eval()
+#         for param in self.model.parameters():
+#             param.requires_grad = False
+
+#     def preprocess(self, x):
+#         # normalize to [0,1]
+#         x = kornia.geometry.resize(x, (224, 224),
+#                                    interpolation='bicubic', align_corners=True,
+#                                    antialias=self.antialias)
+#         x = (x + 1.) / 2.
+#         # renormalize according to clip
+#         x = kornia.enhance.normalize(x, self.mean, self.std)
+#         return x
+
+#     def forward(self, x):
+#         # x is assumed to be in range [-1,1]
+#         z = self.model.encode_image(self.preprocess(x)).float()
+#         # 形状を調整
+#         z = z.view(z.size(0), -1)  # (batch_size, 768)
+#         # 最終層の線形変換
+#         z = self.linear(z)  # (batch_size, latent_dim)
+#         return z
+
+
+# # ------------------------------------------
+# import torch
+# import torch.nn as nn
+# from functools import partial
+# import clip
+# from einops import rearrange, repeat
+# import kornia
+# from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
+
+# class LoRALinear(nn.Module):
+#     def __init__(self, in_features, out_features, rank=4):
+#         super().__init__()
+#         self.rank = rank
+#         self.linear = nn.Linear(in_features, out_features, bias=False)
+#         self.lora_A = nn.Parameter(torch.randn(in_features, rank))
+#         self.lora_B = nn.Parameter(torch.randn(rank, out_features))
+#         self.scaling = 1 / (rank ** 0.5)
+
+#     def forward(self, x):
+#         return self.linear(x) + (x @ self.lora_A @ self.lora_B) * self.scaling
+
+# class LoRA_CLIPTextImageEmbedder(nn.Module):
+#     """
+#     Uses the CLIP transformer encoder for both text and images with LoRA.
+#     """
+#     def __init__(self, version='ViT-L/14', device="cuda", max_length=77, normalize=True, rank=4):
+#         super().__init__()
+#         self.model, _ = clip.load(version, jit=False, device=device)
+#         self.device = device
+#         self.max_length = max_length
+#         self.normalize = normalize
+#         self.rank = rank
+
+#         # Replace linear layers with LoRA layers
+#         self.replace_with_lora(self.model)
+
+#     def replace_with_lora(self, model):
+#         for name, module in model.named_children():
+#             if isinstance(module, nn.Linear):
+#                 setattr(model, name, LoRALinear(module.in_features, module.out_features, self.rank))
+#             else:
+#                 self.replace_with_lora(module)
+
+#     def forward(self, text, image):
+#         # Tokenize and encode text
+#         text_tokens = clip.tokenize(text).to(self.device)
+#         text_features = self.model.encode_text(text_tokens)
+
+#         # Preprocess and encode image
+#         image = self.preprocess(image).to(self.device)
+#         image_features = self.model.encode_image(image)
+
+#         if self.normalize:
+#             text_features = text_features / torch.linalg.norm(text_features, dim=1, keepdim=True)
+#             image_features = image_features / torch.linalg.norm(image_features, dim=1, keepdim=True)
+
+#         return text_features, image_features
+
+#     def preprocess(self, x):
+#         # Normalize to [0,1]
+#         x = kornia.geometry.resize(x, (224, 224),
+#                                    interpolation='bicubic', align_corners=True,
+#                                    antialias=True)
+#         x = (x + 1.) / 2.
+#         # Renormalize according to CLIP
+#         x = kornia.enhance.normalize(x, self.mean, self.std)
+#         return x
+
+#     def encode(self, text, image):
+#         return self(text, image)
+
+# ------------------------------------------
+
+
+
 
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, mid_channels=None, bn=False):

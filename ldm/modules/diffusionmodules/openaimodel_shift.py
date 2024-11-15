@@ -659,14 +659,14 @@ class UNetModel(nn.Module):
 
         time_embed_dim = model_channels * 4
         self.time_embed_dim = time_embed_dim
-        if self.seprate_decoder:
-            self.repre_embed = linear(self.repre_emb_channels, self.time_embed_dim)
+        if self.seprate_decoder:# こっちが呼ばれる
+            self.repre_embed = linear(self.repre_emb_channels, self.time_embed_dim) # 32, 256
             if not self.wo_part_emb:
-                if self.orth_emb:
+                if self.orth_emb:# ここが呼ばれる
                     emb_weight = th.randn([self.time_embed_dim//2, self.time_embed_dim//2])
                     self.part_latents = nn.Embedding.from_pretrained(emb_weight,freeze=False)
                     self.part_emb = linear(self.time_embed_dim//2, self.time_embed_dim)
-                else:
+                else:# こっちにいきたいかも
                     self.part_latents = nn.Embedding(self.latent_unit, self.repre_emb_channels)
                     self.part_emb = linear(self.repre_emb_channels, self.time_embed_dim)
         else:
@@ -1014,13 +1014,14 @@ class UNetModel(nn.Module):
         sub_grad = th.zeros_like(x)
         for ddx, idx in enumerate(range(self.latent_unit)):
             cond = self.repre_embed(z_parts[idx])
+            cond = th.squeeze(cond)
             prt_idx = th.tensor([idx]*h0.shape[0]).to(h0.device)
             if self.orth_emb:
                 part_emb = prt_emb[prt_idx]
                 part_emb = self.part_emb(part_emb)
             else:
                 part_emb = self.part_emb(self.part_latents(prt_idx))
-            shift_t_emb = emb + part_emb
+            shift_t_emb = emb + part_emb 
             # shift_t_emb = emb
             
             
@@ -1033,7 +1034,7 @@ class UNetModel(nn.Module):
                         h = module(h, emb, None)
                         jdx += 1
                     h = h.type(x.dtype)
-                    pred = self.out(h)
+                    pred = self.out(h) 
             shift_h = self.shift_middle_block(h0, emb=shift_t_emb, context = cond)
             jdx = 0
             for module in self.shift_output_blocks:

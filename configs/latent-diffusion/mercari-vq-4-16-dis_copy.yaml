@@ -9,13 +9,15 @@ model:
     timesteps: 1000
     loss_type: l1
     first_stage_key: "image"
-    cond_stage_key: "image"
+    cond_stage_key: "text"
     image_size: 16
     channels: 3
-    cond_stage_trainable: False
+    cond_stage_trainable: true
     concat_mode: False
     scale_by_std: True
-    monitor: 'val/loss_simple_ema'
+    conditioning_key: adm
+    monitor: 'train/epoch_num'
+    dis_loss_flag: True
 
     scheduler_config: # 10000 warmup steps
       target: ldm.lr_scheduler.LambdaLinearScheduler
@@ -27,7 +29,7 @@ model:
         f_min: [ 1.]
 
     unet_config:
-      target: ldm.modules.diffusionmodules.openaimodel.UNetModel
+      target: ldm.modules.diffusionmodules.openaimodel_shift.UNetModel
       params:
         image_size: 16
         in_channels: 3
@@ -37,8 +39,15 @@ model:
         num_res_blocks: 2
         channel_mult: [ 1,2,4,4 ]  # 8,4,2,1
         num_heads: 8
-        use_scale_shift_norm: True
-        resblock_updown: True
+        repre_emb_channels: 32
+        use_scale_shift_norm: true
+        resblock_updown: true
+        seprate_decoder: true
+        orth_emb: true # 大事な引数
+        ckpt_path: "/content/drive/Shareddrives/mercari/resulsts/logs/mercari/0923_simple/2024-09-24T05-14-10_mercari-vq-4-16/checkpoints/last.ckpt"
+        load_ema_ckpt: true
+        latent_unit: 6
+
 
     first_stage_config:
       target: ldm.models.autoencoder.VQModelInterface
@@ -46,7 +55,7 @@ model:
         embed_dim: 3
         n_embed: 2048
         monitor: "val/rec_loss"
-        ckpt_path: "/content/drive/Shareddrives/mercari/resulsts/logs/mercari/0722/2024-07-22T03-21-43_mercari_vq_4_16/checkpoints/last.ckpt"
+        ckpt_path: "/content/drive/Shareddrives/mercari/resulsts/logs/mercari/0923_simple/2024-09-23T14-24-25_mercari_vq_4_16/checkpoints/last.ckpt"
         ddconfig:
           double_z: false
           z_channels: 3
@@ -64,29 +73,48 @@ model:
         lossconfig:
           target: torch.nn.Identity
 
-    cond_stage_config: "__is_unconditional__"
-
+    cond_stage_config:
+      text_encoder:
+        target: ldm.modules.encoders.modules.FrozenCLIPTextEmbedder
+        params:
+          version: 'ViT-L/14'
+          device: 'cuda'        
+          max_length: 77        
+          n_repeat: 2
+          normalize: true 
+      image_encoder:
+        target: ldm.modules.encoders.modules.FrozenClipImageEmbedder
+        params:
+          model: 'ViT-L/14'
+          jit: false
+          device: 'cuda'
+          antialias: false
+    dis_loss_type: Z
+    dis_weight: 0.05
 data:
   target: main.DataModuleFromConfig
   params:
     batch_size: 128
     wrap: True
+    num_workers: 8
     train:
-      target: ldm.data.dis.Mercaritrain
+      target: ldm.data.dis.Mercaritrain_clip
     test:
-      target: ldm.data.dis.Mercaritrain #change ldm.data.dis.Cars3DTrain
+      target: ldm.data.dis.Mercaritrain_clip
 
 lightning:
   callbacks:
     image_logger:
       target: main.ImageLogger
       params:
-        batch_frequency: 1000
-        max_images: 8
+        batch_frequency: 10000
+        max_images: 16
         increase_log_steps: false
         log_images_kwargs:
           inpaint: false
-          plot_swapped_concepts_partial: false
-
+          plot_diffusion_rows: false
+          plot_progressive_rows: false
+          plot_swapped_concepts: true
+          plot_decoded_xstart: true
   trainer:
     benchmark: True

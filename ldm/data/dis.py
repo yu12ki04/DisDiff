@@ -303,6 +303,65 @@ class BaseLMDB(Dataset):
             raise ValueError(f"Failed to load image from buffer for key: {key}, error: {e}")
 
         return img
+
+class BaseLMDB_clip(Dataset):
+    def __init__(self, path, original_resolution, zfill: int = 5):
+        self.original_resolution = original_resolution
+        self.zfill = zfill
+        self.env = lmdb.open(
+            path,
+            max_readers=32,
+            readonly=True,
+            lock=False,
+            readahead=False,
+            meminit=False,
+        )
+
+        if not self.env:
+            raise IOError('Cannot open lmdb dataset', path)
+
+        with self.env.begin(write=False) as txn:
+            self.length = int(txn.get('length'.encode('utf-8')).decode('utf-8'))
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        with self.env.begin(write=False) as txn:
+            # 画像を取得するキーを修正
+            img_key = f'img-{self.original_resolution}-{str(index).zfill(self.zfill)}'.encode('utf-8')
+            img_bytes = txn.get(img_key)
+            # テキストを取得するキー
+            text_key = f'txt-{self.original_resolution}-{str(index).zfill(self.zfill)}'.encode('utf-8')
+            text_bytes = txn.get(text_key)
+            # # テキストを取得
+            # text_key = f'text-{self.original_resolution}-{str(index).zfill(self.zfill)}'.encode('utf-8')
+            # text_bytes = txn.get(text_key)
+
+        if img_bytes is None:
+            raise ValueError(f"No image data found for key: {img_key}")
+        if text_bytes is None:
+            raise ValueError(f"No text data found for key: {text_key}")
+
+        # 画像を処理
+        buffer = BytesIO(img_bytes)
+        try:
+            buffer.seek(0)
+            img = Image.open(buffer)
+            img.verify()  # 画像として正しいか確認
+            buffer.seek(0)
+            img = Image.open(buffer)  # 実際の使用のために再読み込み
+        except (IOError, SyntaxError) as e:
+            raise ValueError(f"Failed to load image from buffer for key: {img_key}, error: {e}")
+
+        # # テキストをデコード
+        # text = text_bytes.decode('utf-8')
+        # テキストをデコードして "|" で分割してリスト化
+        text = text_bytes.decode('utf-8').split('|')
+
+        return img, text
+
+
 class CelebAlmdb(Dataset):
     """
     also supports for d2c crop.
@@ -412,6 +471,66 @@ class Mercarilmdb(Dataset):
         if self.transform is not None:
             img = self.transform(img).permute(1, 2, 0)
         return {'image': img}
+
+
+class Mercarilmdb_clip(Dataset):
+    """
+    Dataset that supports image and text retrieval from an LMDB dataset.
+    """
+    def __init__(self,
+                 path,
+                 image_size,
+                 original_resolution=128,
+                 split=None,
+                 as_tensor: bool = True,
+                 do_augment: bool = False,
+                 do_normalize: bool = True,
+                 crop_d2c: bool = False,
+                 **kwargs):
+        self.original_resolution = original_resolution
+        self.data = BaseLMDB_clip(path, original_resolution, zfill=7)
+        self.length = len(self.data)
+        self.crop_d2c = crop_d2c
+
+        if split is None:
+            self.offset = 0
+        else:
+            raise NotImplementedError()
+
+        if crop_d2c:
+            transform = [
+                d2c_crop(),
+                transforms.Resize(image_size),
+            ]
+        else:
+            transform = [
+                transforms.Resize(image_size),
+                transforms.CenterCrop(image_size),
+            ]
+
+        if do_augment:
+            transform.append(transforms.RandomHorizontalFlip())
+        if as_tensor:
+            transform.append(transforms.ToTensor())
+        if do_normalize:
+            transform.append(
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
+        self.transform = transforms.Compose(transform)
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        assert index < self.length
+        index = index + self.offset
+
+        # Get both image and text
+        img, text = self.data[index]
+
+        if self.transform is not None:
+            img = self.transform(img).permute(1, 2, 0)
+
+        return {'image': img, 'text': text}
 
 class Bedroom_lmdb(Dataset):
     def __init__(self,
@@ -565,6 +684,14 @@ class Celebarain(CelebAlmdb):
 class Mercaritrain(Mercarilmdb):
     def __init__(self, **kwargs):
         super().__init__(path= './data/0711.lmdb',# change '/path/to/your/datasets/',
+                image_size=64,
+                original_resolution=128,
+                crop_d2c=False,
+                **kwargs)
+        
+class Mercaritrain_clip(Mercarilmdb_clip):
+    def __init__(self, **kwargs):
+        super().__init__(path= './data/1017.lmdb',# change '/path/to/your/datasets/',
                 image_size=64,
                 original_resolution=128,
                 crop_d2c=False,
