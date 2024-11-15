@@ -682,17 +682,27 @@ class Celebarain(CelebAlmdb):
                 **kwargs)
 
 class Mercaritrain(Mercarilmdb):
-    def __init__(self, **kwargs):
-        super().__init__(path= './data/0711.lmdb',# change '/path/to/your/datasets/',
-                image_size=64,
-                original_resolution=128,
-                crop_d2c=False,
-                **kwargs)
+    def __init__(self, path=None, **kwargs):
+        if path is None:
+            path = os.getenv('DB_PATH', './data/0711.lmdb')  # デフォルトパスを設定
         
+        super().__init__(
+            path=path,
+            image_size=64,
+            original_resolution=128,
+            crop_d2c=False,
+            **kwargs
+        )
+
 class Mercaritrain_clip(Mercarilmdb_clip):
-    def __init__(self, **kwargs):
-        super().__init__(path= './data/1017.lmdb',# change '/path/to/your/datasets/',
-                image_size=64,
-                original_resolution=128,
-                crop_d2c=False,
-                **kwargs)
+    def __init__(self, path=None, **kwargs):
+        if path is None:
+            path = os.getenv('DB_PATH', './data/1017.lmdb')  # デフォルトパスを設定
+        
+        super().__init__(
+            path=path,
+            image_size=64,
+            original_resolution=128,
+            crop_d2c=False,
+            **kwargs
+        )
