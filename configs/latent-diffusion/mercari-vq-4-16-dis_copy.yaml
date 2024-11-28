@@ -39,7 +39,7 @@ model:
         num_res_blocks: 2
         channel_mult: [ 1,2,4,4 ]  # 8,4,2,1
         num_heads: 8
-        repre_emb_channels: 32
+        repre_emb_channels: 768
         use_scale_shift_norm: true
         resblock_updown: true
         seprate_decoder: true
@@ -94,7 +94,7 @@ model:
 data:
   target: main.DataModuleFromConfig
   params:
-    batch_size: 128
+    batch_size: 64
     wrap: True
     num_workers: 8
     train:

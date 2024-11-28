@@ -609,7 +609,7 @@ class UNetModel(nn.Module):
         wo_part_emb = False,
         orth_emb = False,
         seprate_decoder = False,
-        repre_emb_channels = 32,
+        repre_emb_channels = 768,
         ckpt_path = None,
         load_ema_ckpt = False,
         latent_unit = 6
@@ -1009,9 +1009,14 @@ class UNetModel(nn.Module):
                 k += 1
 
         z_parts = context.chunk(self.latent_unit, dim=1)
+        # print("context shape:", context.shape)
+        # print("z_parts length:", len(z_parts))
+        # print("z_parts[0] shape:", z_parts[0].shape)
         out_grad = 0
         h0 =  h.clone()
         sub_grad = th.zeros_like(x)
+        
+        
         for ddx, idx in enumerate(range(self.latent_unit)):
             cond = self.repre_embed(z_parts[idx])
             cond = th.squeeze(cond)

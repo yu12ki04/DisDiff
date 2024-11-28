@@ -1108,8 +1108,11 @@ class LatentDiffusion(DDPM):
             else:
                 pass
             pred_z = eval_encoder(pred_x0_t)
+            pred_z = pred_z.unsqueeze(1).repeat(1, 6, 1)
             z_parts = pred_z.chunk(self.model.diffusion_model.latent_unit, dim=1)
             pred_z = torch.stack(z_parts, dim=1)
+            pred_z = torch.squeeze(pred_z)
+            # print("pred_z shape:", pred_z.shape)
 
         eps_new_hat = model_forward.pred + ddim_coef*model_forward.sub_grad
         z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
@@ -1119,11 +1122,15 @@ class LatentDiffusion(DDPM):
         else:
             pass
         pred_z_new = eval_encoder(pred_x0_new_t)
+        pred_z_new = pred_z_new.unsqueeze(1).repeat(1, 6, 1)
         z_parts = pred_z_new.chunk(self.model.diffusion_model.latent_unit, dim=1)
         cond = cond.chunk(self.model.diffusion_model.latent_unit, dim=1)
         pred_z_new = torch.stack(z_parts, dim=1)
+        pred_z_new = torch.squeeze(pred_z_new)
         cond = torch.stack(cond, dim=1)
         cond = torch.squeeze(cond)
+        # print("pred_z_new shape:", pred_z_new.shape)
+        # print("cond shape:", cond.shape)
 
 
         with torch.no_grad():
