@@ -1101,7 +1101,7 @@ class LatentDiffusion(DDPM):
         ddim_coef = extract_into_tensor(self.ddim_coef, t, x_t.shape)
         with torch.no_grad():
             eps_hat = model_forward.pred
-            z_start = self.predict_start_from_noise(x_t, t, eps_hat)
+            z_start = self.predict_start_from_noise(x_t, t, eps_hat) # 元の潜在変数に戻す処理(LDMのdecode前)
             pred_x0_t = self.differentiable_decode_first_stage(z_start, force_not_quantize=not self.detach_flag)
             if self.detach_flag:
                 pred_x0_t = pred_x0_t.detach()
