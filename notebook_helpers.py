@@ -107,7 +107,7 @@ def select_cond_path(mode):
     selected_path = os.path.join(path, selected.value)
     return selected_path
 
-def get_cond(mode, selected_path):
+def get_cond(mode, selected_path, text_condition=None):
     example = dict()
     if mode == "superresolution":
         up_f = 4
@@ -130,6 +130,30 @@ def get_cond(mode, selected_path):
         example["LR_image"] = c
         example["image"] = c_up
 
+    elif mode == "mercari":
+        up_f = 4
+        visualize_cond_img(selected_path)
+        target_size=(3, 64, 64)
+
+        c = Image.open(selected_path)
+        c = torch.unsqueeze(torchvision.transforms.ToTensor()(c), 0)
+        c_up = torchvision.transforms.functional.resize(c, size=[up_f * c.shape[2], up_f * c.shape[3]], antialias=True)
+
+        # 画像を指定されたサイズにリシェイプ
+        c_up = torchvision.transforms.functional.resize(c_up, size=target_size[1:3], antialias=True)  # (C, H, W)にリサイズ
+        c = torchvision.transforms.functional.resize(c, size=target_size[1:3], antialias=True)  # (C, H, W)にリサイズ
+
+        c_up = rearrange(c_up, '1 c h w -> 1 h w c')
+        c = rearrange(c, '1 c h w -> 1 h w c')
+        c = 2. * c - 1.
+
+        c = c.to(torch.device("cuda"))
+        example["LR_image"] = c
+        example["image"] = c_up
+        
+        # テキスト条件を追加
+        example["text"] = text_condition if text_condition is not None else "a photo of clothing"
+        
     return example
 
 
@@ -137,9 +161,8 @@ def visualize_cond_img(path):
     display(ipyimg(filename=path))
 
 
-def run(model, selected_path, task, custom_steps, resize_enabled=False, classifier_ckpt=None, global_step=None):
-
-    example = get_cond(task, selected_path)
+def run(model, selected_path, task, custom_steps, text_condition=None, resize_enabled=False, classifier_ckpt=None, global_step=None):
+    example = get_cond(task, selected_path, text_condition)
 
     save_intermediate_vid = False
     n_runs = 1
@@ -226,6 +249,8 @@ def make_convolutional_sample(batch, model, mode="vanilla", custom_steps=None, e
                                         force_c_encode=not (hasattr(model, 'split_input_params')
                                                             and model.cond_stage_key == 'coordinates_bbox'),
                                         return_original_cond=True)
+    print("c.shape", c.shape)
+    c = c.unsqueeze(0)
 
     log_every_t = 1 if save_intermediate_vid else None
 

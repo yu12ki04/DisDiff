@@ -1009,17 +1009,19 @@ class UNetModel(nn.Module):
                 k += 1
 
         z_parts = context.chunk(self.latent_unit, dim=1)
+        
         # print("context shape:", context.shape)
         # print("z_parts length:", len(z_parts))
         # print("z_parts[0] shape:", z_parts[0].shape)
         out_grad = 0
         h0 =  h.clone()
         sub_grad = th.zeros_like(x)
-        
+
         
         for ddx, idx in enumerate(range(self.latent_unit)):
             cond = self.repre_embed(z_parts[idx])
             cond = th.squeeze(cond)
+            cond = cond.unsqueeze(0) # change batch size
             prt_idx = th.tensor([idx]*h0.shape[0]).to(h0.device)
             if self.orth_emb:
                 part_emb = prt_emb[prt_idx]
