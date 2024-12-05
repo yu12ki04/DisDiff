@@ -318,10 +318,8 @@ class ResBlockShift(TimestepBlock):
         down=False,
     ):
         super().__init__()
-        # print(f"ResBlockShift init - channels: {channels}, out_channels: {out_channels or channels}")
         self.channels = channels
         self.emb_channels = emb_channels
-        self.cond_emb_channels = cond_emb_channels
         self.dropout = dropout
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
@@ -329,9 +327,9 @@ class ResBlockShift(TimestepBlock):
         self.use_scale_shift_norm = use_scale_shift_norm
 
         self.in_layers = nn.Sequential(
-            normalization(self.channels),
+            normalization(channels),
             nn.SiLU(),
-            conv_nd(dims, self.channels, self.out_channels, 3, padding=1),
+            conv_nd(dims, channels, self.out_channels, 3, padding=1),
         )
 
         self.updown = up or down
@@ -793,45 +791,40 @@ class UNetModel(nn.Module):
             ),
         )
 
-        self.shift_middle_block = nn.ModuleList([
-            TimestepEmbedSequential(
-                ResBlockShift(
-                    ch,
-                    time_embed_dim,
-                    time_embed_dim,
-                    dropout,
-                    dims=dims,
-                    use_checkpoint=use_checkpoint,
-                    use_scale_shift_norm=use_scale_shift_norm,
-                ),
-                AttentionBlock(
-                    ch,
-                    use_checkpoint=use_checkpoint,
-                    num_heads=num_heads,
-                    num_head_channels=dim_head,
-                    use_new_attention_order=use_new_attention_order,
-                ) if not use_spatial_transformer else SpatialTransformer(
-                    ch, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim
-                ),
-                ResBlockShift(
-                    ch,
-                    time_embed_dim,
-                    time_embed_dim,
-                    dropout,
-                    dims=dims,
-                    use_checkpoint=use_checkpoint,
-                    use_scale_shift_norm=use_scale_shift_norm,
-                ),
-            ) for _ in range(self.latent_unit)
-        ])
+        self.shift_middle_block = TimestepEmbedSequential(
+            ResBlockShift(
+                ch,
+                time_embed_dim,
+                time_embed_dim,
+                dropout,
+                dims=dims,
+                use_checkpoint=use_checkpoint,
+                use_scale_shift_norm=use_scale_shift_norm,
+            ),
+            AttentionBlock(
+                ch,
+                use_checkpoint=use_checkpoint,
+                num_heads=num_heads,
+                num_head_channels=dim_head,
+                use_new_attention_order=use_new_attention_order,
+            ) if not use_spatial_transformer else SpatialTransformer(
+                            ch, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim
+                        ),
+            ResBlockShift(
+                ch,
+                time_embed_dim,
+                time_embed_dim,
+                dropout,
+                dims=dims,
+                use_checkpoint=use_checkpoint,
+                use_scale_shift_norm=use_scale_shift_norm,
+            ),
+        )
         self._feature_size += ch
         ds_new = copy(ds)
         ch_new = copy(ch)
-        self.ch_new_for_output_block = ch_new
         input_block_chans_new = copy(input_block_chans)
-
-        # input_block_chansの保存
-        self.saved_input_block_chans = copy(input_block_chans)
+        
 
         self.output_blocks = nn.ModuleList([])
         for level, mult in list(enumerate(channel_mult))[::-1]:
@@ -887,88 +880,74 @@ class UNetModel(nn.Module):
                     )
                     ds //= 2
                 self.output_blocks.append(TimestepEmbedSequential(*layers))
-                self._feature_size += ch        
+                self._feature_size += ch
 
-        self.shift_output_blocks = nn.ModuleList([
-            nn.ModuleList([]) for _ in range(self.latent_unit)
-        ])
-
-        for decoder_idx in range(self.latent_unit):
-            ch_new = self.ch_new_for_output_block
-            input_block_chans_new = self.saved_input_block_chans.copy()
-
-            # print(f"Decoder {decoder_idx} starting with ch_new: {ch_new}")  # デバッグ用
-    
-            for level, mult in list(enumerate(channel_mult))[::-1]:
-                for i in range(num_res_blocks + 1):
-                    ich = input_block_chans_new.pop()
-                    in_ch = ch_new + ich
-                    # print(f"Creating block for decoder {decoder_idx} with in_ch: {in_ch}, out_ch: {model_channels * mult}")
-                    
-                    layers = [
+        self.shift_output_blocks = nn.ModuleList([])
+        for level, mult in list(enumerate(channel_mult))[::-1]:
+            for i in range(num_res_blocks + 1):
+                ich = input_block_chans_new.pop()
+                layers = [
+                    ResBlockShift(
+                        ch_new + ich,
+                        time_embed_dim,
+                        time_embed_dim,
+                        dropout,
+                        out_channels=model_channels * mult,
+                        dims=dims,
+                        use_checkpoint=use_checkpoint,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                    )
+                ]
+                ch_new = model_channels * mult
+                if ds_new in attention_resolutions:
+                    if num_head_channels == -1:
+                        dim_head = ch_new // num_heads
+                    else:
+                        num_heads = ch_new // num_head_channels
+                        dim_head = num_head_channels
+                    if legacy:
+                        #num_heads = 1
+                        dim_head = ch_new // num_heads if use_spatial_transformer else num_head_channels
+                    layers.append(
+                        AttentionBlock(
+                            ch_new,
+                            use_checkpoint=use_checkpoint,
+                            num_heads=num_heads_upsample,
+                            num_head_channels=dim_head,
+                            use_new_attention_order=use_new_attention_order,
+                        ) if not use_spatial_transformer else SpatialTransformer(
+                            ch_new, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim
+                        )
+                    )
+                if level and i == num_res_blocks:
+                    out_ch = ch_new
+                    layers.append(
                         ResBlockShift(
-                            in_ch,  # concatenateされた後のチャネル数
+                            ch_new,
                             time_embed_dim,
                             time_embed_dim,
                             dropout,
-                            out_channels=model_channels * mult,  # 出力チャネル数を明示的に指定
+                            out_channels=out_ch,
                             dims=dims,
                             use_checkpoint=use_checkpoint,
                             use_scale_shift_norm=use_scale_shift_norm,
+                            up=True,
                         )
-                    ]
-                    ch_new = model_channels * mult
-                    if ds_new in attention_resolutions:
-                        if num_head_channels == -1:
-                            dim_head = ch_new // num_heads
-                        else:
-                            num_heads = ch_new // num_head_channels
-                            dim_head = num_head_channels
-                        if legacy:
-                            #num_heads = 1
-                            dim_head = ch_new // num_heads if use_spatial_transformer else num_head_channels
-                        layers.append(
-                            AttentionBlock(
-                                ch_new,
-                                use_checkpoint=use_checkpoint,
-                                num_heads=num_heads_upsample,
-                                num_head_channels=dim_head,
-                                use_new_attention_order=use_new_attention_order,
-                            ) if not use_spatial_transformer else SpatialTransformer(
-                                ch_new, num_heads, dim_head, depth=transformer_depth, context_dim=context_dim
-                            )
-                        )
-                    if level and i == num_res_blocks:
-                        out_ch = ch_new
-                        layers.append(
-                            ResBlockShift(
-                                ch_new,
-                                time_embed_dim,
-                                time_embed_dim,
-                                dropout,
-                                out_channels=out_ch,
-                                dims=dims,
-                                use_checkpoint=use_checkpoint,
-                                use_scale_shift_norm=use_scale_shift_norm,
-                                up=True,
-                            )
-                            if resblock_updown
-                            else Upsample(ch_new, conv_resample, dims=dims, out_channels=out_ch)
-                        )
-                        ds_new //= 2
-                    self.shift_output_blocks[decoder_idx].append(TimestepEmbedSequential(*layers))
-            input_block_chans_new = copy(input_block_chans)  # Reset for next decoder
-
-        self.shift_out = nn.ModuleList([
-            nn.Sequential(
-                normalization(ch_new),
-                nn.SiLU(),
-                zero_module(conv_nd(dims, model_channels, out_channels, 3, padding=1)),
-            ) for _ in range(self.latent_unit)
-        ])
+                        if resblock_updown
+                        else Upsample(ch_new, conv_resample, dims=dims, out_channels=out_ch)
+                    )
+                    ds_new //= 2
+                self.shift_output_blocks.append(TimestepEmbedSequential(*layers))
+        
 
         self.out = nn.Sequential(
             normalization(ch),
+            nn.SiLU(),
+            zero_module(conv_nd(dims, model_channels, out_channels, 3, padding=1)),
+        )
+
+        self.shift_out = nn.Sequential(
+            normalization(ch_new),
             nn.SiLU(),
             zero_module(conv_nd(dims, model_channels, out_channels, 3, padding=1)),
         )
@@ -1008,7 +987,7 @@ class UNetModel(nn.Module):
         """
         if self.orth_emb:
             prt_emb = torch_expm((self.part_latents.weight - self.part_latents.weight.transpose(0, 1)).unsqueeze(0))
-        with th.no_grad(): # 配計算をしない(事前学習済みのパラメータを使用)
+        with th.no_grad():
             assert (y is not None) == (
                 self.num_classes is not None
             ), "must specify y if and only if the model is class-conditional"
@@ -1061,22 +1040,14 @@ class UNetModel(nn.Module):
                         jdx += 1
                     h = h.type(x.dtype)
                     pred = self.out(h) 
-            shift_h = self.shift_middle_block[idx](h0, emb=shift_t_emb, context=cond)
+            shift_h = self.shift_middle_block(h0, emb=shift_t_emb, context = cond)
             jdx = 0
-            try:  # エラーハンドリングを追加
-                for module in self.shift_output_blocks[idx]:
-                    # print(f"Decoder {idx}, Block input shape:", shift_h.shape)
-                    shift_h = th.cat([shift_h, hs[-jdx-1]], dim=1)
-                    # print(f"Decoder {idx}, Block after cat shape:", shift_h.shape)
-                    shift_h = module(shift_h, emb=shift_t_emb, context=cond)
-                    # print(f"Decoder {idx}, Block output shape:", shift_h.shape)
-                    jdx += 1
-            except Exception as e:
-                print(f"Error in decoder {idx}, block {jdx}: {e}")
-                raise e
-            
+            for module in self.shift_output_blocks:
+                shift_h = th.cat([shift_h, hs[-jdx-1]], dim=1)
+                shift_h = module(shift_h, emb = shift_t_emb, context = cond)
+                jdx += 1
             shift_h = shift_h.type(x.dtype)
-            shift_h = self.shift_out[idx](shift_h)
+            shift_h = self.shift_out(shift_h)
             if "sampled_concept" in kwargs.keys():
                 indexes = np.array([i for i in range(shift_h.shape[0])])
                 sub_grad[indexes[kwargs["sampled_concept"] == idx]] = shift_h[indexes[kwargs["sampled_concept"] == idx]]
@@ -1134,11 +1105,10 @@ class UNetModel(nn.Module):
                 self.part_emb.train()
                 self.part_latents.train()
 
-            # 各属性のmiddle blockとoutput blocksをtrain modeに
-            for i in range(self.latent_unit):
-                self.shift_middle_block[i].train()
-                self.shift_output_blocks[i].train()
-                self.shift_out[i].train()
+            
+            self.shift_middle_block.train()
+            self.shift_output_blocks.train()
+            self.shift_out.train()
             self.repre_embed.train()
         else:
             self.eval()
@@ -1149,27 +1119,21 @@ class UNetModel(nn.Module):
             self.part_emb.eval()
             self.part_latents.eval()
         
-        # 各属性のmiddle blockとoutput blocksをeval modeに
-        for i in range(self.latent_unit):
-            self.shift_middle_block[i].eval()
-            self.shift_output_blocks[i].eval()
-            self.shift_out[i].eval()
+        self.shift_middle_block.eval()
+        self.shift_output_blocks.eval()
+        self.shift_out.eval()
         self.repre_embed.eval()
 
     def parameters(self):
         params = []
-        # 各属性のパラメータを追加
-        for i in range(self.latent_unit):
-            params += [
-                self.shift_out[i].parameters(),
-                self.shift_middle_block[i].parameters(),
-                self.shift_output_blocks[i].parameters()
-            ]
-        params.append(self.repre_embed.parameters())
-        
+        params += [self.shift_out.parameters(), 
+                self.shift_middle_block.parameters(),
+                self.shift_output_blocks.parameters(),
+                self.repre_embed.parameters()]
         if self.seprate_decoder and (not self.wo_part_emb):
             params.append(self.part_emb.parameters())
             params.append(self.part_latents.parameters())
+            # params.append(self.part_emb.parameters())
         return itertools.chain(*params)
 
 class EncoderUNetModel(nn.Module):

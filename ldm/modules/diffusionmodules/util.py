@@ -224,6 +224,7 @@ def normalization(channels):
     :param channels: number of input channels.
     :return: an nn.Module for normalization.
     """
+    # print(f"Creating normalization layer for {channels} channels")
     return GroupNorm32(32, channels)
 
 
