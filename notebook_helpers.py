@@ -2,6 +2,7 @@ from torchvision.datasets.utils import download_url
 from ldm.util import instantiate_from_config
 import torch
 import os
+import numpy as np
 # todo ?
 # from google.colab import files
 from IPython.display import Image as ipyimg
@@ -13,6 +14,22 @@ import torch, torchvision
 from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.util import ismap
 import time
+from omegaconf import OmegaConf
+from torch.utils.data import DataLoader
+from torchvision.utils import make_grid
+
+
+from ldm.data.dis import Mercaritrain_clip
+from ldm.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
+from ldm.modules.ema import LitEma
+from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianDistribution
+from ldm.models.autoencoder import VQModelInterface, IdentityFirstStage, AutoencoderKL
+from ldm.modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
+from ldm.models.diffusion.ddim import DDIMSampler
+from ldm.modules.diffusionmodules.util import return_wrap
+import copy
+import os
+import pandas as pd
 from omegaconf import OmegaConf
 
 
@@ -303,3 +320,317 @@ def make_convolutional_sample(batch, model, mode="vanilla", custom_steps=None, e
     log["time"] = t1 - t0
 
     return log
+
+
+@torch.no_grad()
+def visualize_diffusion_process(
+    model, 
+    batch,
+    N=8,
+    n_row=8,
+    ddim_steps=200,
+    ddim_eta=1.0,
+    return_keys=None,
+    plot_options={
+        'denoise_rows': False,
+        'progressive_rows': True,
+        'diffusion_rows': True,
+        'swapped_concepts': False,
+        'decoded_xstart': False,
+        'swapped_concepts_partial': True
+    }
+):
+    """
+    バッチデータからDiffusionプロセスを可視化する関数
+    
+    Args:
+        model: Diffusionモデル
+        batch: データローダーからのバッチ
+        N: サンプル数
+        n_row: 表示する行数
+        ddim_steps: DDIMのステップ数
+        ddim_eta: DDIMのノイズスケール係数
+        return_keys: 返すべきキーのリスト
+        plot_options: 可視化オプションの辞書
+    """
+    log = dict()
+    use_ddim = ddim_steps is not None
+
+    # 入力の取得と前処理
+    z, c, x, xrec, xc = model.get_input(
+        batch, 
+        model.first_stage_key,
+        return_first_stage_outputs=True,
+        force_c_encode=True,
+        return_original_cond=True,
+        bs=N
+    )
+    
+    N = min(x.shape[0], N)
+    n_row = min(x.shape[0], n_row)
+    log["inputs"] = x
+    log["reconstruction"] = xrec
+
+    # コンディショニングの処理
+    if model.model.conditioning_key is not None:
+        if hasattr(model.cond_stage_model, "decode"):
+            xc = model.cond_stage_model.decode(c)
+            log["conditioning"] = xc
+        elif model.cond_stage_key in ["caption"]:
+            xc = log_txt_as_img((x.shape[2], x.shape[3]), batch["caption"])
+            log["conditioning"] = xc
+        elif model.cond_stage_key == 'class_label':
+            xc = log_txt_as_img((x.shape[2], x.shape[3]), batch["human_label"])
+            log['conditioning'] = xc
+        elif isimage(xc):
+            log["conditioning"] = xc
+        if ismap(xc):
+            log["original_conditioning"] = model.to_rgb(xc)
+
+    # Diffusion行の生成
+    if plot_options['diffusion_rows']:
+        diffusion_row = []
+        z_start = z[:n_row]
+        for t in range(model.num_timesteps):
+            if t % model.log_every_t == 0 or t == model.num_timesteps - 1:
+                t = repeat(torch.tensor([t]), '1 -> b', b=n_row)
+                t = t.to(model.device).long()
+                noise = torch.randn_like(z_start)
+                z_noisy = model.q_sample(x_start=z_start, t=t, noise=noise)
+                diffusion_row.append(model.decode_first_stage(z_noisy))
+
+        diffusion_row = torch.stack(diffusion_row)
+        diffusion_grid = rearrange(diffusion_row, 'n b c h w -> b n c h w')
+        diffusion_grid = rearrange(diffusion_grid, 'b n c h w -> (b n) c h w')
+        diffusion_grid = make_grid(diffusion_grid, nrow=diffusion_row.shape[0])
+        log["diffusion_row"] = diffusion_grid
+
+    # サンプリングと追加の可視化
+    with model.ema_scope("Plotting"):
+        samples, z_denoise_row = model.sample_log(
+            cond=c,
+            batch_size=N,
+            ddim=use_ddim,
+            ddim_steps=ddim_steps,
+            eta=ddim_eta
+        )
+        x_samples = model.decode_first_stage(samples)
+        log["samples"] = x_samples
+
+    # プログレッシブデノイジング
+    if plot_options['progressive_rows']:
+        with model.ema_scope("Plotting Progressives"):
+            img, progressives = model.progressive_denoising(
+                c,
+                shape=(model.channels, model.image_size, model.image_size),
+                batch_size=N
+            )
+            prog_row = model._get_denoise_row_from_list(progressives, desc="Progressive Generation")
+            log["progressive_row"] = prog_row
+
+    # コンセプトスワッピング
+    if plot_options['swapped_concepts']:
+        x_samples_list = []
+        with model.ema_scope("Plotting Swapping"):
+            for cdx in range(model.model.diffusion_model.latent_unit):
+                swapped_c = c.clone()
+                swapped_c = torch.stack(swapped_c.chunk(model.model.diffusion_model.latent_unit, dim=1), dim=1)
+                swapped_c = torch.squeeze(swapped_c)
+                swapped_c[:,cdx] = swapped_c[0,cdx][None,:].repeat(c.shape[0],1)
+                samples, z_denoise_row = model.sample_log(
+                    cond=swapped_c.reshape(c.shape[0],-1),
+                    batch_size=N,
+                    ddim=use_ddim,
+                    ddim_steps=ddim_steps,
+                    eta=ddim_eta
+                )
+                x_samples = model.decode_first_stage(samples)
+                x_samples_list.append(x_samples)
+            log["samples_swapping"] = torch.cat(x_samples_list, dim=0)
+
+    # 部分的なコンセプトスワッピング
+    if plot_options['swapped_concepts_partial']:
+        x_samples_list = []
+        with model.ema_scope("Plotting Swapping"):
+            for cdx in range(model.model.diffusion_model.latent_unit):
+                swapped_c = c.clone()
+                swapped_c = torch.stack(swapped_c.chunk(model.model.diffusion_model.latent_unit, dim=1), dim=1)
+                swapped_c = torch.squeeze(swapped_c)
+                swapped_c[:,cdx] = swapped_c[0,cdx][None,:].repeat(c.shape[0],1)
+                samples, z_denoise_row = model.sample_log(
+                    cond=swapped_c.reshape(c.shape[0],-1),
+                    batch_size=N,
+                    ddim=use_ddim,
+                    ddim_steps=ddim_steps,
+                    eta=ddim_eta,
+                    sampled_index=np.array([cdx]*N)
+                )
+                x_samples = model.decode_first_stage(samples)
+                x_samples_list.append(x_samples)
+            log["samples_swapping_partial"] = torch.cat(x_samples_list, dim=0)
+
+    # デコードされたxstartの可視化
+    if plot_options['decoded_xstart']:
+        with model.ema_scope("Plotting PredXstart"):
+            z_start = z[:n_row]
+            diffusion_start = []
+            diffusion_full = []
+            for cdx in range(model.model.diffusion_model.latent_unit):
+                diffusion_row = []
+                for t in range(model.num_timesteps):
+                    if (t % (model.log_every_t//2) == 0 or t == model.num_timesteps - 1) and t >= model.num_timesteps//2:
+                        t = repeat(torch.tensor([t]), '1 -> b', b=n_row)
+                        t = t.to(model.device).long()
+                        noise = torch.randn_like(z_start)
+                        z_noisy = model.q_sample(x_start=z_start, t=t, noise=noise)
+
+                        model_out = model.apply_model(
+                            z_noisy, 
+                            t, 
+                            c, 
+                            return_ids=False, 
+                            sampled_concept=np.array([cdx]*n_row)
+                        )
+                        eps_pred = model_out.pred + extract_into_tensor(model.ddim_coef, t, x.shape) * model_out.sub_grad
+                        x_recon = model.predict_start_from_noise(z_noisy, t=t, noise=eps_pred)
+                        diffusion_row.append(model.decode_first_stage(x_recon))
+
+                        if cdx == 0:
+                            eps_pred = model_out.pred
+                            x_recon = model.predict_start_from_noise(z_noisy, t=t, noise=eps_pred)
+                            diffusion_start.append(model.decode_first_stage(x_recon))
+
+                            eps_pred = model_out.pred + extract_into_tensor(model.ddim_coef, t, x.shape) * model_out.out_grad
+                            x_recon = model.predict_start_from_noise(z_noisy, t=t, noise=eps_pred)
+                            diffusion_full.append(model.decode_first_stage(x_recon))
+
+                diffusion_row = torch.stack(diffusion_row)
+                diffusion_grid = rearrange(diffusion_row, 'n b c h w -> b n c h w')
+                diffusion_grid = rearrange(diffusion_grid, 'b n c h w -> (b n) c h w')
+                diffusion_grid = make_grid(diffusion_grid, nrow=diffusion_row.shape[0])
+                log[f"predXstart_{cdx}"] = diffusion_grid
+
+                if cdx == 0:
+                    # Start predictions
+                    diffusion_start = torch.stack(diffusion_start)
+                    diffusion_grid = rearrange(diffusion_start, 'n b c h w -> b n c h w')
+                    diffusion_grid = rearrange(diffusion_grid, 'b n c h w -> (b n) c h w')
+                    diffusion_grid = make_grid(diffusion_grid, nrow=diffusion_start.shape[0])
+                    log["predXstart_st"] = diffusion_grid
+
+                    # Full predictions
+                    diffusion_full = torch.stack(diffusion_full)
+                    diffusion_grid = rearrange(diffusion_full, 'n b c h w -> b n c h w')
+                    diffusion_grid = rearrange(diffusion_grid, 'b n c h w -> (b n) c h w')
+                    diffusion_grid = make_grid(diffusion_grid, nrow=diffusion_full.shape[0])
+                    log["predXstart_fl"] = diffusion_grid
+
+    if return_keys:
+        if np.intersect1d(list(log.keys()), return_keys).shape[0] == 0:
+            return log
+        else:
+            return {key: log[key] for key in return_keys}
+    return log
+
+def get_mercari_dataloader(
+    batch_size=8,
+    num_workers=4,
+    path=None,
+    **kwargs
+):
+    """
+    Mercariデータセットのデータローダーを取得する関数
+    
+    Args:
+        batch_size: バッチサイズ
+        num_workers: データ読み込みに使用するワーカー数
+        path: データセットのパス（Noneの場合はデフォルトパスを使用）
+        **kwargs: その他のパラメータ（image_size以外）
+    
+    Returns:
+        DataLoader: Mercariデータセットのデータローダー
+    """
+    # image_sizeがkwargsに含まれている場合は削除
+    if 'image_size' in kwargs:
+        del kwargs['image_size']
+    
+    # データセットの初期化
+    dataset = Mercaritrain_clip(
+        path=path,
+        **kwargs
+    )
+    
+    # データローダーの作成
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=True,
+        collate_fn=mercari_collate_fn  # カスタムcollate_fnを追加
+    )
+    
+    return dataloader
+
+def mercari_collate_fn(batch):
+    """
+    バッチデータを適切な形式に変換するcollate関数
+    
+    Args:
+        batch: データセットから取得したバッチ
+        
+    Returns:
+        dict: 処理済みのバッチデータ
+    """
+    images = []
+    texts = []
+    
+    for item in batch:
+        images.append(item['image'])
+        # テキストがtupleの場合は文字列に変換
+        if isinstance(item.get('text'), tuple):
+            texts.append(' '.join(item['text']))
+        else:
+            texts.append(item.get('text', ''))
+    
+    return {
+        'image': torch.stack(images),
+        'text': texts  # リストとして返す
+    }
+
+def get_batch_from_dataloader(dataloader):
+    """
+    データローダーから1バッチを取得する関数
+    
+    Args:
+        dataloader: データローダー
+    
+    Returns:
+        batch: 1バッチ分のデータ
+    """
+    return next(iter(dataloader))
+
+# 使用例：
+"""
+# notebookでの使用方法：
+
+# データローダーの取得
+dataloader = get_mercari_dataloader(batch_size=8)
+
+# 1バッチの取得
+batch = get_batch_from_dataloader(dataloader)
+
+# 可視化の実行
+logs = visualize_diffusion_process(
+    model,
+    batch,
+    N=8,
+    n_row=8,
+    ddim_steps=200,
+    plot_options={
+        'progressive_rows': True,
+        'diffusion_rows': True,
+        'swapped_concepts': True
+    }
+)
+"""
