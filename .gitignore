@@ -1,2 +1,5 @@
 exp_vq_shapes3d
 logs
+# Python bytecode
+__pycache__/
+*.pyc
