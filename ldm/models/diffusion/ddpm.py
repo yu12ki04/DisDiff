@@ -626,7 +626,7 @@ class LatentDiffusion(DDPM):
         :param h: height
         :param w: width
         :return: normalized distance to image border,
-         wtith min distance = 0 at border and max dist = 0.5 at image center
+         wtih min distance = 0 at border and max dist = 0.5 at image center
         """
         lower_right_corner = torch.tensor([h - 1, w - 1]).view(1, 1, 2)
         arr = self.meshgrid(h, w) / lower_right_corner
@@ -706,7 +706,7 @@ class LatentDiffusion(DDPM):
     @torch.no_grad()
     def get_input(self, batch, k, return_first_stage_outputs=False, force_c_encode=False,
                   cond_key=None, return_original_cond=False, bs=None):
-        x = super().get_input(batch, k)# k: self.first_stage_key = 'image' # 画像のバッチデータが返ってくる
+        x = super().get_input(batch, k)# k: self.first_stage_key = 'image' # 画像のバッ��データが返ってくる
         if bs is not None:# Noneだから実行しない
             x = x[:bs]
         x = x.to(self.device)
@@ -1081,7 +1081,7 @@ class LatentDiffusion(DDPM):
         os.mkdir(os.path.join(self.logdir, "dis_repre"))
         np.savez(cond_dir, latents=cond_cat.numpy(), num_samples= np.array(self.global_step))
 
-    def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):# sampled_conceptはlatent_unitの内，値を一つランダムに抽出したもの
+    def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):
         if not self.train_enc_flag:
             if isinstance(self.cond_stage_model, dict):     
                 eval_encoder = self.cond_stage_model["image_encoder"]
@@ -1099,57 +1099,83 @@ class LatentDiffusion(DDPM):
                 eval_encoder = self.cond_stage_model
 
         ddim_coef = extract_into_tensor(self.ddim_coef, t, x_t.shape)
+        
+        # Base prediction
         with torch.no_grad():
             eps_hat = model_forward.pred
             z_start = self.predict_start_from_noise(x_t, t, eps_hat)
-            pred_x0_t = self.differentiable_decode_first_stage(z_start, force_not_quantize=not self.detach_flag)
+            pred_x0_t = self.differentiable_decode_first_stage(z_start)
             if self.detach_flag:
                 pred_x0_t = pred_x0_t.detach()
-            else:
-                pass
             pred_z = eval_encoder(pred_x0_t)
-            pred_z = pred_z.unsqueeze(1).repeat(1, 6, 1)
             z_parts = pred_z.chunk(self.model.diffusion_model.latent_unit, dim=1)
             pred_z = torch.stack(z_parts, dim=1)
             pred_z = torch.squeeze(pred_z)
-            # print("pred_z shape:", pred_z.shape)
 
-        eps_new_hat = model_forward.pred + ddim_coef*model_forward.sub_grad
-        z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
-        pred_x0_new_t = self.differentiable_decode_first_stage(z_start_new, force_not_quantize=not self.detach_flag)
-        if self.detach_flag:
-            pred_x0_new_t = pred_x0_new_t.detach()
+        if isinstance(model_forward, Return_grad_multi):
+            # 全ての属性の勾配を使って画像を生成
+            pred_z_all = []
+            for grad in model_forward.sub_grads:
+                eps_new_hat = model_forward.pred + ddim_coef * grad
+                z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
+                pred_x0_new_t = self.differentiable_decode_first_stage(z_start_new)
+                
+                if self.detach_flag:
+                    pred_x0_new_t = pred_x0_new_t.detach()
+                
+                # 各属性の画像をエンコード
+                pred_z_new = eval_encoder(pred_x0_new_t)
+                z_parts = pred_z_new.chunk(self.model.diffusion_model.latent_unit, dim=1)
+                pred_z_new = torch.stack(z_parts, dim=1)
+                pred_z_new = torch.squeeze(pred_z_new)
+                pred_z_all.append(pred_z_new)
+
+            # sampled_conceptの属性に対してのみ損失を計算
+            logits = torch.norm(pred_z - pred_z_all[sampled_concept], dim=-1)
+            dis_loss = self.ce_loss(logits, torch.tensor([sampled_concept]).cuda())
+            
+            if self.dis_loss_type == "IM":
+                eps_new_hat = model_forward.pred + ddim_coef * model_forward.sub_grads[sampled_concept]
+                z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
+                pred_x0_new_t = self.differentiable_decode_first_stage(z_start_new)
+                dis_weight = mean_flat((pred_x0_t - pred_x0_new_t.detach())**2)
+            elif self.dis_loss_type == "Z":
+                eps_new_hat = model_forward.pred + ddim_coef * model_forward.sub_grads[sampled_concept]
+                z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
+                dis_weight = mean_flat((z_start - z_start_new.detach())**2)
+            else:
+                raise NotImplementedError
+                
+            return dis_weight * self.dis_weight * dis_loss
+
+        elif isinstance(model_forward, Return_grad_full):
+            # 既存の実装をそのまま維持
+            eps_new_hat = model_forward.pred + ddim_coef * model_forward.sub_grad
+            z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
+            pred_x0_new_t = self.differentiable_decode_first_stage(z_start_new)
+            
+            if self.detach_flag:
+                pred_x0_new_t = pred_x0_new_t.detach()
+            
+            pred_z_new = eval_encoder(pred_x0_new_t)
+            z_parts = pred_z_new.chunk(self.model.diffusion_model.latent_unit, dim=1)
+            pred_z_new = torch.stack(z_parts, dim=1)
+            pred_z_new = torch.squeeze(pred_z_new)
+            
+            logits = torch.norm(pred_z - pred_z_new, dim=-1)
+            dis_loss = self.ce_loss(logits, torch.tensor([sampled_concept]).cuda())
+
+            if self.dis_loss_type == "IM":
+                dis_weight = mean_flat((pred_x0_t - pred_x0_new_t.detach())**2)
+            elif self.dis_loss_type == "Z":
+                dis_weight = mean_flat((z_start - z_start_new.detach())**2)
+            else:
+                raise NotImplementedError
+
+            return dis_weight * self.dis_weight * dis_loss
+
         else:
-            pass
-        pred_z_new = eval_encoder(pred_x0_new_t)
-        pred_z_new = pred_z_new.unsqueeze(1).repeat(1, 6, 1)
-        z_parts = pred_z_new.chunk(self.model.diffusion_model.latent_unit, dim=1)
-        cond = cond.chunk(self.model.diffusion_model.latent_unit, dim=1)
-        pred_z_new = torch.stack(z_parts, dim=1)
-        pred_z_new = torch.squeeze(pred_z_new)
-        cond = torch.stack(cond, dim=1)
-        cond = torch.squeeze(cond)
-        # print("pred_z_new shape:", pred_z_new.shape)
-        # print("cond shape:", cond.shape)
-
-
-        with torch.no_grad():
-            norm_org = torch.norm(pred_z - cond.detach(), dim=-1)
-        norm_Z = torch.norm(pred_z_new - cond.detach(), dim=-1)
-        logits_deta = torch.norm(pred_z - pred_z_new, dim = -1)
-        logits = norm_org - norm_Z
-
-        dis_loss = self.ce_loss(logits, torch.from_numpy(sampled_concept).cuda())
-        dis_loss_deta = self.ce_loss(logits_deta, torch.from_numpy(sampled_concept).cuda())
-        
-        if self.dis_loss_type == "IM":  
-            dis_weight = mean_flat((pred_x0_t - pred_x0_new_t.detach())**2)
-        elif self.dis_loss_type == "Z":
-            dis_weight = mean_flat((z_start - z_start_new.detach())**2)
-        else:
-            raise NotImplementedError
-        
-        return dis_weight * self.dis_weight * (dis_loss + dis_loss_deta)
+            raise ValueError("Invalid model_forward type")
 
 
 
