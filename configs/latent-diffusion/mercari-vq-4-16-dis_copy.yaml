@@ -39,14 +39,14 @@ model:
         num_res_blocks: 2
         channel_mult: [ 1,2,4,4 ]  # 8,4,2,1
         num_heads: 8
-        repre_emb_channels: 768
+        repre_emb_channels: 32
         use_scale_shift_norm: true
         resblock_updown: true
         seprate_decoder: true
         orth_emb: true # 大事な引数
         ckpt_path: ${env:UNET_CKPT_PATH}
         load_ema_ckpt: true
-        latent_unit: 6
+        latent_unit: 7
 
 
     first_stage_config:
@@ -81,7 +81,7 @@ model:
           device: 'cuda'        
           max_length: 77        
           n_repeat: 2
-          normalize: true 
+          normalize: true
       image_encoder:
         target: ldm.modules.encoders.modules.FrozenClipImageEmbedder
         params:
@@ -94,7 +94,7 @@ model:
 data:
   target: main.DataModuleFromConfig
   params:
-    batch_size: 64
+    batch_size: 16
     wrap: True
     num_workers: 8
     train:
