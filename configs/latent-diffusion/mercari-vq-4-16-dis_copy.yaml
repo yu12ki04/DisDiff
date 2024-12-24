@@ -39,7 +39,7 @@ model:
         num_res_blocks: 2
         channel_mult: [ 1,2,4,4 ]  # 8,4,2,1
         num_heads: 8
-        repre_emb_channels: 768
+        repre_emb_channels: 32
         use_scale_shift_norm: true
         resblock_updown: true
         seprate_decoder: true

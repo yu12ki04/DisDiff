@@ -19,7 +19,7 @@ from ldm.modules.diffusionmodules.util import (
     timestep_embedding,
 )
 from ldm.modules.attention import SpatialTransformer
-from .util import Return_grad, Return_grad_full, Return
+from .util import Return_grad, Return_grad_full, Return, Return_grad_multi
 import itertools
 
 # dummy replace
@@ -976,7 +976,7 @@ class UNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
-    def forward(self, x, timesteps=None, context=None, y=None,**kwargs):
+    def forward(self, x, timesteps=None, context=None, y=None, **kwargs):
         """
         Apply the model to an input batch.
         :param x: an [N x C x ...] Tensor of inputs.
@@ -1074,7 +1074,9 @@ class UNetModel(nn.Module):
             # print("sub_grad shape:", sub_grad.shape)
             return Return_grad(pred=pred, out_grad=sub_grad)
         else:
+
             return Return_grad(pred=pred, out_grad=out_grad)
+
     
     def init_model(self):
         state_dict = th.load(self.ckpt_path,map_location='cpu')['state_dict']

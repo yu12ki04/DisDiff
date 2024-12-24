@@ -626,7 +626,7 @@ class LatentDiffusion(DDPM):
         :param h: height
         :param w: width
         :return: normalized distance to image border,
-         wtith min distance = 0 at border and max dist = 0.5 at image center
+         wtih min distance = 0 at border and max dist = 0.5 at image center
         """
         lower_right_corner = torch.tensor([h - 1, w - 1]).view(1, 1, 2)
         arr = self.meshgrid(h, w) / lower_right_corner
@@ -706,7 +706,7 @@ class LatentDiffusion(DDPM):
     @torch.no_grad()
     def get_input(self, batch, k, return_first_stage_outputs=False, force_c_encode=False,
                   cond_key=None, return_original_cond=False, bs=None):
-        x = super().get_input(batch, k)# k: self.first_stage_key = 'image' # 画像のバッチデータが返ってくる
+        x = super().get_input(batch, k)# k: self.first_stage_key = 'image' # 画像のバッ��データが返ってくる
         if bs is not None:# Noneだから実行しない
             x = x[:bs]
         x = x.to(self.device)
@@ -1081,7 +1081,7 @@ class LatentDiffusion(DDPM):
         os.mkdir(os.path.join(self.logdir, "dis_repre"))
         np.savez(cond_dir, latents=cond_cat.numpy(), num_samples= np.array(self.global_step))
 
-    def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):# sampled_conceptはlatent_unitの内，値を一つランダムに抽出したもの
+    def dis_loss(self, model_forward, x_t, t, cond, sampled_concept):
         if not self.train_enc_flag:
             if isinstance(self.cond_stage_model, dict):     
                 eval_encoder = self.cond_stage_model["image_encoder"]
@@ -1102,11 +1102,9 @@ class LatentDiffusion(DDPM):
         with torch.no_grad():# \hat{z}を計算
             eps_hat = model_forward.pred
             z_start = self.predict_start_from_noise(x_t, t, eps_hat)
-            pred_x0_t = self.differentiable_decode_first_stage(z_start, force_not_quantize=not self.detach_flag)
+            pred_x0_t = self.differentiable_decode_first_stage(z_start)
             if self.detach_flag:
                 pred_x0_t = pred_x0_t.detach()
-            else:
-                pass
             pred_z = eval_encoder(pred_x0_t)
             pred_z = pred_z.unsqueeze(1).repeat(1, self.model.diffusion_model.latent_unit, 1)
             # z_parts = pred_z.chunk(self.model.diffusion_model.latent_unit, dim=1)
@@ -1234,9 +1232,7 @@ class LatentDiffusion(DDPM):
         elif self.dis_loss_type == "Z":
             dis_weight = mean_flat((z_start - z_start_new.detach())**2)
         else:
-            raise NotImplementedError
-        
-        return dis_weight * self.dis_weight * (dis_loss + dis_loss_deta)
+            raise ValueError("Invalid model_forward type")
 
 
 

@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from einops import repeat
+from typing import List
 
 from ldm.util import instantiate_from_config
 from typing import NamedTuple
@@ -30,12 +31,17 @@ class Return_grad_full(NamedTuple):
     out_grad: torch.Tensor
     sub_grad: torch.Tensor
 
+class Return_grad_multi(NamedTuple):
+    pred: torch.Tensor
+    sub_grads: List[torch.Tensor]  # List of gradients for each attribute
+
 def return_wrap(inp, coef):
     if isinstance(inp, Return):
         return inp.pred
     elif isinstance(inp, Return_grad) or isinstance(inp, Return_grad_full):
-        # return inp.out_grad
         return inp.pred + coef * inp.out_grad
+    elif isinstance(inp, Return_grad_multi):
+        return inp.pred + coef * sum(inp.sub_grads)
 
 
 
