@@ -1099,7 +1099,7 @@ class LatentDiffusion(DDPM):
                 eval_encoder = self.cond_stage_model
 
         ddim_coef = extract_into_tensor(self.ddim_coef, t, x_t.shape)
-        with torch.no_grad():
+        with torch.no_grad():# \hat{z}を計算
             eps_hat = model_forward.pred
             z_start = self.predict_start_from_noise(x_t, t, eps_hat)
             pred_x0_t = self.differentiable_decode_first_stage(z_start, force_not_quantize=not self.detach_flag)
@@ -1108,37 +1108,124 @@ class LatentDiffusion(DDPM):
             else:
                 pass
             pred_z = eval_encoder(pred_x0_t)
-            pred_z = pred_z.unsqueeze(1).repeat(1, 6, 1)
-            z_parts = pred_z.chunk(self.model.diffusion_model.latent_unit, dim=1)
-            pred_z = torch.stack(z_parts, dim=1)
-            pred_z = torch.squeeze(pred_z)
+            pred_z = pred_z.unsqueeze(1).repeat(1, self.model.diffusion_model.latent_unit, 1)
+            # z_parts = pred_z.chunk(self.model.diffusion_model.latent_unit, dim=1)
+            # pred_z = torch.stack(z_parts, dim=1)
+            # pred_z = torch.squeeze(pred_z)
             # print("pred_z shape:", pred_z.shape)
 
-        eps_new_hat = model_forward.pred + ddim_coef*model_forward.sub_grad
-        z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
-        pred_x0_new_t = self.differentiable_decode_first_stage(z_start_new, force_not_quantize=not self.detach_flag)
-        if self.detach_flag:
-            pred_x0_new_t = pred_x0_new_t.detach()
-        else:
-            pass
-        pred_z_new = eval_encoder(pred_x0_new_t)
-        pred_z_new = pred_z_new.unsqueeze(1).repeat(1, 6, 1)
-        z_parts = pred_z_new.chunk(self.model.diffusion_model.latent_unit, dim=1)
-        cond = cond.chunk(self.model.diffusion_model.latent_unit, dim=1)
-        pred_z_new = torch.stack(z_parts, dim=1)
-        pred_z_new = torch.squeeze(pred_z_new)
-        cond = torch.stack(cond, dim=1)
-        cond = torch.squeeze(cond)
+        # \hat{z}_{k|k}を計算
+        # eps_new_hat = model_forward.pred + ddim_coef*model_forward.sub_grad
+        # z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
+        # pred_x0_new_t = self.differentiable_decode_first_stage(z_start_new, force_not_quantize=not self.detach_flag)
+        # if self.detach_flag:
+        #     pred_x0_new_t = pred_x0_new_t.detach()
+        # else:
+        #     pass
+        # pred_z_new = eval_encoder(pred_x0_new_t)
+        # pred_z_new = pred_z_new.unsqueeze(1).repeat(1, 6, 1)
+        # z_parts = pred_z_new.chunk(self.model.diffusion_model.latent_unit, dim=1)
+
+
+
+        # # 各contextに対応する画像を生成
+        # images_list = []
+        # for idx in range(self.model.diffusion_model.latent_unit):
+        #     eps_new_hat = model_forward.pred + ddim_coef * model_forward.sub_grad[idx]
+        #     z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
+        #     pred_x0_new_t = self.differentiable_decode_first_stage(
+        #         z_start_new, force_not_quantize=not self.detach_flag
+        #     )
+        #     if self.detach_flag:
+        #         pred_x0_new_t = pred_x0_new_t.detach()
+            
+        #     images_list.append(pred_x0_new_t)
+        # # print("images_list shape:", images_list[0].shape)
+        # # 一度にCLIPエンコーダに通す
+        # all_images = torch.cat(images_list, dim=0)
+        # pred_z_news_all = eval_encoder(all_images)
+
+        # # 形状を整える [batch_size, latent_unit, feature_dim]
+        # pred_z_news = pred_z_news_all.view(x_t.shape[0], self.model.diffusion_model.latent_unit, -1)
+
+        # print("all_images shape:", all_images.shape)
+        # print("pred_z_news_all shape:", pred_z_news_all.shape)
+        # print("pred_z_news shape:", pred_z_news.shape)
+
+
+
+
+        # pred_x0_new_ts = []
+        pred_z_news = []
+        for idx in range(self.model.diffusion_model.latent_unit):
+            # print("idx:", idx)
+            # 各contextに対応する勾配を使用
+            # print("ddim_coef:", ddim_coef)
+            eps_new_hat = model_forward.pred + ddim_coef * model_forward.sub_grad[idx]
+            z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
+
+            pred_x0_new_t = self.differentiable_decode_first_stage(z_start_new, force_not_quantize=not self.detach_flag)
+
+            if self.detach_flag:
+                pred_x0_new_t = pred_x0_new_t.detach()
+            
+            # pred_x0_new_ts.append(pred_x0_new_t)
+            # print("pred_x0_new_t shape:", pred_x0_new_t.shape)
+            
+            # 各画像に対してCLIP特徴を抽出
+            pred_z_new = eval_encoder(pred_x0_new_t)
+            pred_z_news.append(pred_z_new)
+
+
+
+        # for idx in range(self.model.diffusion_model.latent_unit):
+        #     with torch.cuda.amp.autocast():  # 混合精度を使用
+        #         eps_new_hat = model_forward.pred + ddim_coef * model_forward.sub_grad[idx]
+        #         z_start_new = self.predict_start_from_noise(x_t, t, eps_new_hat)
+        #         pred_x0_new_t = self.differentiable_decode_first_stage(z_start_new, force_not_quantize=not self.detach_flag)
+        #         if self.detach_flag:
+        #             pred_x0_new_t = pred_x0_new_t.detach()
+                
+        #         pred_z_new = eval_encoder(pred_x0_new_t)
+        #         pred_z_news.append(pred_z_new)
+                
+        #         # 明示的にメモリ解放
+        #         torch.cuda.empty_cache()
+
+
+        # 特徴をスタック
+        pred_z_news = torch.stack(pred_z_news, dim=1)  # [batch_size, 7, feature_dim]
+        
+        # conditioningも同様に処理
+        # cond = cond.chunk(self.model.diffusion_model.latent_unit, dim=1)
+        # pred_z_new = torch.stack(z_parts, dim=1)
+        # pred_z_new = torch.squeeze(pred_z_new)
+        # cond = torch.stack(cond, dim=1)
+        # cond = torch.squeeze(cond)
         # print("pred_z_new shape:", pred_z_new.shape)
         # print("cond shape:", cond.shape)
 
+        # print("pred_z shape:", pred_z.shape)
+        # print("pred_z_news shape:", pred_z_news.shape)
+        # print("cond shape:", cond.shape)
 
-        with torch.no_grad():
-            norm_org = torch.norm(pred_z - cond.detach(), dim=-1)
-        norm_Z = torch.norm(pred_z_new - cond.detach(), dim=-1)
-        logits_deta = torch.norm(pred_z - pred_z_new, dim = -1)
-        logits = norm_org - norm_Z
+        # print("pred_z_news differnce between cond")
+        # for i in range(pred_z_news.shape[1]-1):
+        #     diff = torch.norm(pred_z_news[:,i] - pred_z_news[:,i+1], dim=-1)
+        #     print("Diff between pred_z_news[:,i] and pred_z_news[:,i+1]",diff)
 
+        # temperature = 10.0
+        # with torch.no_grad():
+        #     norm_org = torch.norm(pred_z - cond.detach(), dim=-1)
+        norm_Z = torch.norm(pred_z_news - cond.detach(), dim=-1)
+        logits_deta = torch.norm(pred_z - pred_z_news, dim = -1)#*temperature
+        # logits = (norm_org - norm_Z)
+        logits = norm_Z #* temperature # norm_orgはclipのimage_encoderの出力とtext_encoderの出力の差分だから，学習可能なGを通した部分はないので，意味がない
+        # デバッグ用のコード
+        # print("logits range:", logits.min().item(), logits.max().item())
+        # print("sampled_concept values:", sampled_concept)
+        # print("logits:", logits)  # 各クラスのスコアを確認
+        # print("logits_deta:", logits_deta)  # 各クラスのスコアを確認
         dis_loss = self.ce_loss(logits, torch.from_numpy(sampled_concept).cuda())
         dis_loss_deta = self.ce_loss(logits_deta, torch.from_numpy(sampled_concept).cuda())
         
@@ -1415,7 +1502,12 @@ class LatentDiffusion(DDPM):
                    plot_diffusion_rows=True, plot_swapped_concepts = False, plot_decoded_xstart=False, plot_swapped_concepts_partial=True, **kwargs):
 
         use_ddim = ddim_steps is not None
-        # plot_swapped_concepts = True
+        # plot_swapped_concepts = False
+        # plot_diffusion_rows = False
+        # plot_denoise_rows = False
+        # plot_progressive_rows = False
+        # plot_swapped_concepts_partial = False
+
 
         log = dict()
         z, c, x, xrec, xc = self.get_input(batch, self.first_stage_key,
@@ -1555,8 +1647,8 @@ class LatentDiffusion(DDPM):
                             noise = torch.randn_like(z_start)
                             z_noisy = self.q_sample(x_start=z_start, t=t, noise=noise)
 
-                            model_out = self.apply_model(z_noisy, t, c, return_ids=False, sampled_concept = np.array([cdx]*n_row))
-                            eps_pred = model_out.pred + extract_into_tensor(self.ddim_coef, t, x.shape) * model_out.sub_grad
+                            model_out = self.apply_model(z_noisy, t, c, return_ids=False, sampled_index = np.array([cdx]*n_row))
+                            eps_pred = model_out.pred + extract_into_tensor(self.ddim_coef, t, x.shape) * model_out.out_grad
                             x_recon = self.predict_start_from_noise(z_noisy, t=t, noise=eps_pred)
 
                             diffusion_row.append(self.decode_first_stage(x_recon))
