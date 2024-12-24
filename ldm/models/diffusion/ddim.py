@@ -146,14 +146,21 @@ class DDIMSampler(object):
                 assert x0 is not None
                 img_orig = self.model.q_sample(x0, ts)  # TODO: deterministic forward pass?
                 img = img_orig * mask + (1. - mask) * img
+            # print("img shape:", img.shape)
 
+            # print(f"Before p_sample_ddim - img shape: {img.shape}")
+            # print(f"kwargs contents: {kwargs}")
+            
             outs = self.p_sample_ddim(x = img, c=cond, t=ts, index=index, use_original_steps=ddim_use_original_steps,
                                       quantize_denoised=quantize_denoised, temperature=temperature,
                                       noise_dropout=noise_dropout, score_corrector=score_corrector,
                                       corrector_kwargs=corrector_kwargs,
                                       unconditional_guidance_scale=unconditional_guidance_scale,
                                       unconditional_conditioning=unconditional_conditioning, **kwargs)
+            # print(f"p_sample_ddim returned shapes: {[o.shape for o in outs]}")
             img, pred_x0 = outs
+            # print(f"After assignment - img shape: {img.shape}")
+
             if callback: callback(i)
             if img_callback: img_callback(pred_x0, i)
 

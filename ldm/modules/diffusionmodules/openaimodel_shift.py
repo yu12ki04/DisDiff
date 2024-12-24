@@ -1015,14 +1015,15 @@ class UNetModel(nn.Module):
         # print("z_parts[0] shape:", z_parts[0].shape)
         out_grad = 0
         h0 =  h.clone()
-        sub_grad = th.zeros_like(x)
-        sub_grads = []
-
+        sub_grads = th.zeros((self.latent_unit,) + x.shape).to(x.device)  # 各潜在表現の勾配を保存するテンソル
         
+        # print("x.shape:", x.shape)
+        # print("original sub_grad initial shape:", sub_grads.shape)
+
         for ddx, idx in enumerate(range(self.latent_unit)):
             cond = self.repre_embed(z_parts[idx])
             cond = th.squeeze(cond)
-            # cond = cond.unsqueeze(0) # change batch size
+            
             prt_idx = th.tensor([idx]*h0.shape[0]).to(h0.device)
             if self.orth_emb:
                 part_emb = prt_emb[prt_idx]
@@ -1030,8 +1031,8 @@ class UNetModel(nn.Module):
             else:
                 part_emb = self.part_emb(self.part_latents(prt_idx))
             shift_t_emb = emb + part_emb 
-            # shift_t_emb = emb
-            
+
+            # print("part_emb difference",part_emb)
             
             if ddx == 0:
                 with th.no_grad():
@@ -1043,33 +1044,39 @@ class UNetModel(nn.Module):
                         jdx += 1
                     h = h.type(x.dtype)
                     pred = self.out(h) 
-            shift_h = self.shift_middle_block(h0, emb=shift_t_emb, context = cond)
+            shift_h = self.shift_middle_block(h0, emb=shift_t_emb, context=cond)
             jdx = 0
             for module in self.shift_output_blocks:
                 shift_h = th.cat([shift_h, hs[-jdx-1]], dim=1)
-                shift_h = module(shift_h, emb = shift_t_emb, context = cond)
+                shift_h = module(shift_h, emb=shift_t_emb, context=cond)
                 jdx += 1
             shift_h = shift_h.type(x.dtype)
             shift_h = self.shift_out(shift_h)
-            sub_grads.append(shift_h)
             
-            if "sampled_concept" in kwargs.keys():
-                indexes = np.array([i for i in range(shift_h.shape[0])])
-                sub_grad[indexes[kwargs["sampled_concept"] == idx]] = shift_h[indexes[kwargs["sampled_concept"] == idx]]
+            # print(f"shift_h shape for part {idx}:", shift_h.shape)
+            # print("shift_h difference",shift_h)
             
-            if "sampled_index" in kwargs.keys():
-                indexes = np.array([i for i in range(shift_h.shape[0])])
-                sub_grad[indexes[kwargs["sampled_index"] == idx]] = shift_h[indexes[kwargs["sampled_index"] == idx]]
+            # if "sampled_concept" in kwargs.keys():
+            #     indexes = np.array([i for i in range(shift_h.shape[0])])
+            #     sub_grad[indexes[kwargs["sampled_concept"] == idx]] = shift_h[indexes[kwargs["sampled_concept"] == idx]]
+            
+            # if "sampled_index" in kwargs.keys():
+            #     indexes = np.array([i for i in range(shift_h.shape[0])])
+            #     sub_grad[indexes[kwargs["sampled_index"] == idx]] = shift_h[indexes[kwargs["sampled_index"] == idx]]
+            sub_grads[idx] = shift_h
             out_grad += shift_h
+
+        # print("final sub_grad shape:", sub_grads.shape)
         if "sampled_concept" in kwargs.keys():
-            return Return_grad_multi(pred=pred, sub_grads=sub_grads)
+            return Return_grad_full(pred=pred, out_grad=out_grad, sub_grad=sub_grads)
         elif "sampled_index" in kwargs.keys():
-            return Return_grad(pred = pred, out_grad = sub_grad)
+            sub_grad = sub_grads[kwargs["sampled_index"][0]]
+            # print("sub_grad shape:", sub_grad.shape)
+            return Return_grad(pred=pred, out_grad=sub_grad)
         else:
-            if kwargs.get("return_all_grads", False):
-                return Return_grad_multi(pred=pred, sub_grads=sub_grads)
-            else:
-                return Return_grad(pred = pred, out_grad = out_grad)
+
+            return Return_grad(pred=pred, out_grad=out_grad)
+
     
     def init_model(self):
         state_dict = th.load(self.ckpt_path,map_location='cpu')['state_dict']
